@@ -1,0 +1,2282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D Voxel Quidditch Championship</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;900&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0b132b;
+            font-family: 'Inter', sans-serif;
+        }
+        #game-canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        .font-magic {
+            font-family: 'Cinzel', serif;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.78);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(251, 191, 36, 0.35);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), inset 0 0 18px rgba(251, 191, 36, 0.08);
+        }
+        .gold-glow {
+            text-shadow: 0 0 14px rgba(251, 191, 36, 0.75);
+        }
+        @keyframes pulseBanner {
+            0% { transform: scale(0.85) translateY(-10px); opacity: 0; }
+            15% { transform: scale(1.05) translateY(0); opacity: 1; }
+            85% { transform: scale(1) translateY(0); opacity: 1; }
+            100% { transform: scale(0.95) translateY(-8px); opacity: 0; }
+        }
+        .notify-anim {
+            animation: pulseBanner 2.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
+        .house-card {
+            transition: all 0.2s ease;
+        }
+        .house-card:hover {
+            transform: translateY(-3px);
+        }
+        .house-card.selected {
+            border-color: #fbbf24;
+            box-shadow: 0 0 20px rgba(251, 191, 36, 0.45);
+            transform: scale(1.03);
+        }
+        #crosshair {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            width: 28px;
+            height: 28px;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 15;
+        }
+        /* Mobile touch controls */
+        .touch-btn {
+            touch-action: none;
+            background: rgba(15, 23, 42, 0.65);
+            border: 1px solid rgba(251, 191, 36, 0.4);
+            backdrop-filter: blur(6px);
+        }
+        .touch-btn:active {
+            background: rgba(251, 191, 36, 0.35);
+            transform: scale(0.94);
+        }
+    </style>
+</head>
+<body class="text-slate-100">
+
+    <!-- 3D WebGL Canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Center Aim Reticle -->
+    <div id="crosshair" class="hidden">
+        <svg viewBox="0 0 36 36" class="w-full h-full opacity-80">
+            <circle cx="18" cy="18" r="13" fill="none" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <circle cx="18" cy="18" r="2.2" fill="#fbbf24"/>
+        </svg>
+    </div>
+
+    <!-- Off-Screen 3D Waypoint Markers Layer -->
+    <div id="markers-layer" class="fixed inset-0 pointer-events-none z-10 overflow-hidden hidden">
+        <!-- Snitch Indicator -->
+        <div id="marker-snitch" class="absolute flex flex-col items-center transform -translate-x-1/2 -translate-y-1/2 transition-opacity duration-150">
+            <div class="w-7 h-7 rounded-full bg-amber-400/90 border-2 border-white shadow-[0_0_12px_#fbbf24] flex items-center justify-center text-xs font-bold text-slate-900">✦</div>
+            <span class="text-[10px] font-bold tracking-wider uppercase text-amber-300 bg-slate-950/75 px-1.5 py-0.5 rounded mt-0.5">Snitch <span id="dist-snitch">0m</span></span>
+        </div>
+        <!-- Quaffle Indicator -->
+        <div id="marker-quaffle" class="absolute flex flex-col items-center transform -translate-x-1/2 -translate-y-1/2 transition-opacity duration-150">
+            <div class="w-6 h-6 rounded-full bg-red-600/90 border-2 border-amber-200 shadow-[0_0_10px_#ef4444] flex items-center justify-center text-[10px] font-bold text-white">Q</div>
+            <span class="text-[10px] font-bold tracking-wider uppercase text-red-300 bg-slate-950/75 px-1.5 py-0.5 rounded mt-0.5">Quaffle <span id="dist-quaffle">0m</span></span>
+        </div>
+        <!-- Target Hoops Indicator -->
+        <div id="marker-hoop" class="absolute flex flex-col items-center transform -translate-x-1/2 -translate-y-1/2 transition-opacity duration-150">
+            <div class="w-6 h-6 rounded-full bg-emerald-500/90 border-2 border-amber-300 shadow-[0_0_10px_#10b981] flex items-center justify-center text-[10px] font-bold text-slate-950">◎</div>
+            <span class="text-[10px] font-bold tracking-wider uppercase text-emerald-300 bg-slate-950/75 px-1.5 py-0.5 rounded mt-0.5">Goal <span id="dist-hoop">0m</span></span>
+        </div>
+    </div>
+
+    <!-- Active Gameplay HUD -->
+    <div id="hud" class="fixed inset-0 pointer-events-none z-20 hidden flex flex-col justify-between p-3 sm:p-5">
+        <!-- Top Scoreboard & Controls Bar -->
+        <div class="flex items-start justify-between gap-2">
+            <!-- Scoreboard -->
+            <div class="glass-panel rounded-2xl px-4 py-2.5 flex items-center gap-4 sm:gap-6 mx-auto">
+                <!-- Player House -->
+                <div class="flex items-center gap-2.5">
+                    <div id="hud-player-crest" class="w-4 h-8 rounded-sm bg-red-700 border border-amber-400"></div>
+                    <div>
+                        <div id="hud-player-house" class="text-[11px] uppercase tracking-widest text-amber-300 font-bold">Gryffindor</div>
+                        <div id="hud-player-score" class="font-magic text-2xl sm:text-3xl font-black text-white leading-none">0</div>
+                    </div>
+                </div>
+
+                <!-- Match Clock & Status -->
+                <div class="flex flex-col items-center px-3 border-x border-slate-700/80">
+                    <span class="text-[10px] uppercase tracking-widest text-slate-400">Match Time</span>
+                    <span id="hud-timer" class="font-mono text-lg sm:text-xl font-bold text-amber-300">03:00</span>
+                    <span id="hud-possession" class="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mt-0.5">Quaffle Loose</span>
+                </div>
+
+                <!-- Opponent House -->
+                <div class="flex items-center gap-2.5 text-right">
+                    <div>
+                        <div id="hud-ai-house" class="text-[11px] uppercase tracking-widest text-emerald-400 font-bold">Slytherin</div>
+                        <div id="hud-ai-score" class="font-magic text-2xl sm:text-3xl font-black text-white leading-none">0</div>
+                    </div>
+                    <div id="hud-ai-crest" class="w-4 h-8 rounded-sm bg-emerald-800 border border-slate-300"></div>
+                </div>
+            </div>
+
+            <!-- Top-Right Action Buttons -->
+            <div class="pointer-events-auto flex items-center gap-2 fixed top-3 right-3 sm:top-5 sm:right-5">
+                <button id="btn-music" title="Toggle Orchestral Music" class="glass-panel hover:border-amber-400 text-amber-300 px-2.5 py-2.5 rounded-xl font-semibold text-xs uppercase tracking-wider transition flex items-center gap-1">
+                    <span>♫</span><span id="music-status" class="hidden sm:inline">Music</span>
+                </button>
+                <button id="btn-mute" title="Toggle Sound" class="glass-panel hover:border-amber-400 text-amber-300 p-2.5 rounded-xl transition">
+                    <svg id="icon-sound-on" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+                    <svg id="icon-sound-off" class="w-5 h-5 hidden text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>
+                </button>
+                <button id="btn-pause" title="Pause Game (P / Esc)" class="glass-panel hover:border-amber-400 text-amber-300 px-3 py-2.5 rounded-xl font-semibold text-xs uppercase tracking-wider transition">
+                    Pause
+                </button>
+            </div>
+        </div>
+
+        <!-- Live Stadium Announcer Commentary Ticker -->
+        <div id="announcer-box" class="mx-auto mt-2 glass-panel rounded-full px-5 py-1.5 flex items-center gap-2.5 border border-amber-400/50 shadow-lg max-w-xl transition-all duration-300 opacity-0">
+            <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping shrink-0"></span>
+            <span class="text-[10px] font-black uppercase tracking-widest text-amber-300 shrink-0">Announcer:</span>
+            <span id="announcer-text" class="text-xs sm:text-sm font-semibold text-white truncate">Welcome to the Hogwarts Quidditch Stadium!</span>
+        </div>
+
+        <!-- Center Dynamic Event Notification Banner -->
+        <div id="notification-area" class="flex flex-col items-center justify-center my-auto pointer-events-none"></div>
+
+        <!-- Bottom HUD: Radar, Boost Bar & Quick Prompt -->
+        <div class="flex flex-col sm:flex-row items-center justify-between gap-3 w-full max-w-5xl mx-auto">
+            <!-- Mini Top-Down Pitch Radar -->
+            <div class="glass-panel rounded-2xl p-2 flex items-center gap-3">
+                <canvas id="radar-canvas" width="120" height="80" class="rounded-lg bg-emerald-950/80 border border-emerald-500/30"></canvas>
+                <div class="text-[11px] space-y-1 pr-2 hidden md:block">
+                    <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-white inline-block"></span> You</div>
+                    <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span> Quaffle</div>
+                    <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span> Golden Snitch</div>
+                    <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block"></span> Bludgers</div>
+                </div>
+            </div>
+
+            <!-- Action Prompt & Broom Boost Gauge -->
+            <div class="glass-panel rounded-2xl px-5 py-3 w-full sm:w-80 flex flex-col gap-2">
+                <div class="flex justify-between items-center text-xs">
+                    <span class="uppercase tracking-wider font-bold text-amber-300">Nimbus Turbo Boost</span>
+                    <span id="hud-speed" class="font-mono text-slate-300">68 MPH</span>
+                </div>
+                <div class="w-full h-3 bg-slate-900 rounded-full overflow-hidden border border-slate-700 p-0.5">
+                    <div id="boost-bar" class="h-full bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-200 rounded-full transition-all duration-75" style="width: 100%;"></div>
+                </div>
+                <div id="action-hint" class="text-[11px] text-center text-slate-300 font-medium">
+                    Fly into the <span class="text-red-400 font-bold">Red Quaffle</span> to grab it, or catch the <span class="text-amber-300 font-bold">Golden Snitch</span>!
+                </div>
+            </div>
+
+            <!-- Controls Quick Reference (Desktop) -->
+            <div class="glass-panel rounded-2xl px-4 py-2.5 text-[11px] text-slate-300 hidden lg:block space-y-1">
+                <div><span class="text-amber-300 font-bold">Mouse / Arrows:</span> Steer Pitch & Yaw</div>
+                <div><span class="text-amber-300 font-bold">W / S:</span> Throttle / Hover Brake</div>
+                <div><span class="text-amber-300 font-bold">Space:</span> Turbo Boost &nbsp;|&nbsp; <span class="text-amber-300 font-bold">Click / E:</span> Throw Quaffle</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile / Touch On-Screen Controls (Shown on touch devices during play) -->
+    <div id="touch-controls" class="fixed inset-x-0 bottom-28 z-20 px-4 flex justify-between items-end pointer-events-none md:hidden hidden">
+        <!-- Virtual Flight Pad -->
+        <div class="pointer-events-auto grid grid-cols-3 gap-1.5 w-36 h-36">
+            <div></div>
+            <button id="tc-up" class="touch-btn rounded-xl flex items-center justify-center text-amber-300 font-bold text-lg">▲</button>
+            <div></div>
+            <button id="tc-left" class="touch-btn rounded-xl flex items-center justify-center text-amber-300 font-bold text-lg">◀</button>
+            <button id="tc-brake" class="touch-btn rounded-xl flex items-center justify-center text-xs text-slate-300 font-bold">STOP</button>
+            <button id="tc-right" class="touch-btn rounded-xl flex items-center justify-center text-amber-300 font-bold text-lg">▶</button>
+            <div></div>
+            <button id="tc-down" class="touch-btn rounded-xl flex items-center justify-center text-amber-300 font-bold text-lg">▼</button>
+            <div></div>
+        </div>
+        <!-- Boost & Throw Buttons -->
+        <div class="pointer-events-auto flex flex-col gap-3">
+            <button id="tc-throw" class="touch-btn w-20 h-14 rounded-2xl font-bold text-xs uppercase tracking-wider text-red-300 border-red-400/50">Throw</button>
+            <button id="tc-boost" class="touch-btn w-20 h-16 rounded-2xl font-bold text-xs uppercase tracking-wider text-amber-300 border-amber-400/60">Boost</button>
+        </div>
+    </div>
+
+    <!-- START MENU OVERLAY -->
+    <div id="menu-start" class="fixed inset-0 z-30 flex items-center justify-center p-4 bg-slate-950/65 backdrop-blur-sm overflow-y-auto">
+        <div class="glass-panel rounded-3xl max-w-2xl w-full p-6 sm:p-8 text-center space-y-6 my-auto">
+            <div>
+                <div class="inline-block px-3 py-1 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-300 text-xs font-bold uppercase tracking-widest mb-2">
+                    Hogwarts Voxel Cup
+                </div>
+                <h1 class="font-magic text-3xl sm:text-5xl font-black text-amber-300 gold-glow tracking-wide">
+                    VOXEL QUIDDITCH
+                </h1>
+                <p class="text-slate-300 text-sm sm:text-base mt-2 max-w-lg mx-auto">
+                    Take to the skies on your enchanted broomstick! Score with the Quaffle (+10 pts), dodge rogue Bludgers, and catch the Golden Snitch (+150 pts) to win the House Cup.
+                </p>
+            </div>
+
+            <!-- House Selection -->
+            <div class="space-y-2.5">
+                <label class="block text-xs uppercase tracking-widest text-amber-300 font-bold">Choose Your Hogwarts House</label>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3" id="house-selector">
+                    <button data-house="gryffindor" class="house-card selected glass-panel rounded-2xl p-3 flex flex-col items-center gap-1.5 border-2 border-transparent">
+                        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-red-700 to-amber-500 border border-amber-300 shadow"></div>
+                        <span class="font-magic font-bold text-sm text-amber-300">Gryffindor</span>
+                        <span class="text-[10px] text-slate-400">Scarlet & Gold</span>
+                    </button>
+                    <button data-house="slytherin" class="house-card glass-panel rounded-2xl p-3 flex flex-col items-center gap-1.5 border-2 border-transparent">
+                        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-800 to-slate-300 border border-slate-200 shadow"></div>
+                        <span class="font-magic font-bold text-sm text-emerald-400">Slytherin</span>
+                        <span class="text-[10px] text-slate-400">Emerald & Silver</span>
+                    </button>
+                    <button data-house="ravenclaw" class="house-card glass-panel rounded-2xl p-3 flex flex-col items-center gap-1.5 border-2 border-transparent">
+                        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-800 to-amber-600 border border-amber-400 shadow"></div>
+                        <span class="font-magic font-bold text-sm text-blue-300">Ravenclaw</span>
+                        <span class="text-[10px] text-slate-400">Blue & Bronze</span>
+                    </button>
+                    <button data-house="hufflepuff" class="house-card glass-panel rounded-2xl p-3 flex flex-col items-center gap-1.5 border-2 border-transparent">
+                        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-yellow-400 to-zinc-900 border border-yellow-300 shadow"></div>
+                        <span class="font-magic font-bold text-sm text-yellow-300">Hufflepuff</span>
+                        <span class="text-[10px] text-slate-400">Yellow & Black</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Difficulty Selection -->
+            <div class="flex flex-wrap items-center justify-center gap-3">
+                <span class="text-xs uppercase tracking-widest text-slate-400 font-bold">Difficulty:</span>
+                <div class="inline-flex rounded-xl bg-slate-900/90 p-1 border border-slate-700" id="difficulty-selector">
+                    <button data-diff="easy" class="diff-btn px-3.5 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider bg-amber-500 text-slate-950 transition">Casual (Hero)</button>
+                    <button data-diff="normal" class="diff-btn px-3.5 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider text-slate-300 transition">Standard</button>
+                    <button data-diff="hard" class="diff-btn px-3.5 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider text-slate-300 transition">Expert</button>
+                </div>
+            </div>
+
+            <!-- Controls Guide Box -->
+            <div class="bg-slate-900/75 border border-slate-700/80 rounded-2xl p-4 text-left grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs text-slate-300">
+                <div class="flex items-center gap-2"><span class="px-2 py-0.5 rounded bg-slate-800 border border-slate-600 text-amber-300 font-mono font-bold">Mouse / Arrows</span> Steer Pitch & Turn</div>
+                <div class="flex items-center gap-2"><span class="px-2 py-0.5 rounded bg-slate-800 border border-slate-600 text-amber-300 font-mono font-bold">W / S</span> Accelerate / Brake</div>
+                <div class="flex items-center gap-2"><span class="px-2 py-0.5 rounded bg-slate-800 border border-slate-600 text-amber-300 font-mono font-bold">Spacebar</span> Turbo Broom Boost</div>
+                <div class="flex items-center gap-2"><span class="px-2 py-0.5 rounded bg-slate-800 border border-slate-600 text-amber-300 font-mono font-bold">Click / E</span> Homing Quaffle Shot</div>
+            </div>
+
+            <!-- Launch Button -->
+            <button id="btn-start-match" class="w-full sm:w-auto px-10 py-4 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-magic font-black text-lg tracking-wider uppercase shadow-[0_0_25px_rgba(251,191,36,0.55)] transition transform hover:scale-105 active:scale-95">
+                Enter Stadium & Kick Off
+            </button>
+        </div>
+    </div>
+
+    <!-- CINEMATIC ENTRY OVERLAY (Tunnel Walk & Team Lineup) -->
+    <div id="intro-overlay" class="fixed inset-0 z-25 pointer-events-none hidden flex flex-col justify-between p-6 sm:p-10">
+        <div class="flex justify-between items-start">
+            <div class="glass-panel rounded-2xl px-5 py-3 border-amber-400/50">
+                <div id="intro-stage-tag" class="text-[10px] font-black uppercase tracking-widest text-amber-300">Pre-Match Ceremony</div>
+                <div id="intro-headline" class="font-magic text-lg sm:text-2xl font-black text-white mt-0.5">Walking Onto The Pitch</div>
+            </div>
+            <button id="btn-skip-intro" class="pointer-events-auto glass-panel hover:border-amber-400 text-amber-300 px-4 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition shadow-lg">
+                Skip Intro [Space] ⏭
+            </button>
+        </div>
+
+        <!-- Bottom Cinematic Subtitle / Announcer Caption -->
+        <div class="mx-auto max-w-2xl w-full text-center mb-4">
+            <div class="glass-panel rounded-2xl px-6 py-4 border-2 border-amber-400/60 shadow-2xl">
+                <div class="text-[11px] font-black uppercase tracking-widest text-amber-300 mb-1">🎙 Hogwarts Stadium Commentary</div>
+                <p id="intro-caption" class="font-magic text-base sm:text-xl font-bold text-white leading-snug">
+                    "And here come the players, emerging from the stone tunnel to a thunderous roar!"
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- PAUSE MENU OVERLAY -->
+    <div id="menu-pause" class="fixed inset-0 z-30 hidden flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-md">
+        <div class="glass-panel rounded-3xl max-w-md w-full p-8 text-center space-y-6">
+            <div class="inline-block px-4 py-1 rounded-full bg-amber-500/20 border border-amber-400 text-amber-300 text-xs font-bold uppercase tracking-widest">
+                Time-Out Called
+            </div>
+            <h2 class="font-magic text-3xl font-black text-amber-300 gold-glow">
+                MATCH PAUSED
+            </h2>
+            <div class="flex flex-col gap-3">
+                <button id="btn-resume" class="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-magic font-black uppercase tracking-wider shadow-lg transition transform hover:scale-105">
+                    Resume Flight
+                </button>
+                <button id="btn-restart-pause" class="w-full py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-amber-300 font-bold uppercase text-xs tracking-wider transition">
+                    Restart Match
+                </button>
+                <button id="btn-quit" class="w-full py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 font-bold uppercase text-xs tracking-wider transition">
+                    Quit to House Select
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- GAME OVER / SUMMARY OVERLAY -->
+    <div id="menu-gameover" class="fixed inset-0 z-30 hidden flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-md">
+        <div class="glass-panel rounded-3xl max-w-lg w-full p-8 text-center space-y-6">
+            <div id="gameover-badge" class="inline-block px-4 py-1 rounded-full bg-amber-500/20 border border-amber-400 text-amber-300 text-xs font-bold uppercase tracking-widest">
+                Full Time
+            </div>
+            <h2 id="gameover-title" class="font-magic text-4xl font-black text-amber-300 gold-glow">
+                GRYFFINDOR WINS!
+            </h2>
+            <p id="gameover-reason" class="text-slate-300 text-sm">
+                You caught the Golden Snitch for +150 points!
+            </p>
+
+            <!-- Final Score Card -->
+            <div class="bg-slate-900/80 border border-slate-700 rounded-2xl p-5 flex items-center justify-around">
+                <div>
+                    <div id="end-player-house" class="text-xs uppercase tracking-widest text-amber-300 font-bold">Gryffindor</div>
+                    <div id="end-player-score" class="font-magic text-4xl font-black text-white mt-1">180</div>
+                </div>
+                <div class="text-slate-500 font-magic text-xl">VS</div>
+                <div>
+                    <div id="end-ai-house" class="text-xs uppercase tracking-widest text-emerald-400 font-bold">Slytherin</div>
+                    <div id="end-ai-score" class="font-magic text-4xl font-black text-white mt-1">40</div>
+                </div>
+            </div>
+
+            <!-- Match Stats -->
+            <div class="grid grid-cols-3 gap-2 text-xs">
+                <div class="bg-slate-900/60 rounded-xl p-2.5 border border-slate-800">
+                    <div class="text-slate-400">Goals Scored</div>
+                    <div id="stat-goals" class="text-lg font-bold text-amber-300 mt-0.5">3</div>
+                </div>
+                <div class="bg-slate-900/60 rounded-xl p-2.5 border border-slate-800">
+                    <div class="text-slate-400">Snitch Caught</div>
+                    <div id="stat-snitch" class="text-lg font-bold text-amber-300 mt-0.5">Yes</div>
+                </div>
+                <div class="bg-slate-900/60 rounded-xl p-2.5 border border-slate-800">
+                    <div class="text-slate-400">Bludger Hits</div>
+                    <div id="stat-hits" class="text-lg font-bold text-red-400 mt-0.5">0</div>
+                </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row gap-3 pt-2">
+                <button id="btn-play-again" class="flex-1 py-4 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-magic font-black uppercase tracking-wider shadow-lg transition transform hover:scale-105">
+                    Play Again
+                </button>
+                <button id="btn-end-menu" class="px-6 py-4 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 font-bold uppercase text-xs tracking-wider transition">
+                    House Select
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    /**
+     * ============================================================================
+     * 3D VOXEL QUIDDITCH CHAMPIONSHIP
+     * Complete self-contained Three.js Voxel Game + Procedural Web Audio Engine
+     * ============================================================================
+     */
+
+    // --- 1. HOUSE CONFIGURATIONS & DIFFICULTY PRESETS ---
+    const HOUSES = {
+        gryffindor: { name: 'Gryffindor', primary: 0x991b1b, secondary: 0xfbbf24, hexPrimary: '#b91c1c', hexText: 'text-amber-300', rival: 'slytherin' },
+        slytherin:  { name: 'Slytherin',  primary: 0x065f46, secondary: 0xd1d5db, hexPrimary: '#047857', hexText: 'text-emerald-400', rival: 'gryffindor' },
+        ravenclaw:  { name: 'Ravenclaw',  primary: 0x1e3a8a, secondary: 0xd97706, hexPrimary: '#1d4ed8', hexText: 'text-blue-300', rival: 'hufflepuff' },
+        hufflepuff: { name: 'Hufflepuff', primary: 0xeab308, secondary: 0x18181b, hexPrimary: '#eab308', hexText: 'text-yellow-300', rival: 'ravenclaw' }
+    };
+
+    // Hero-favored presets: Player is fast & agile; Easy/Normal make winning heroic & fun
+    const DIFFICULTY = {
+        easy:   { aiSpeed: 18, snitchSpeed: 24, bludgerSpeed: 18, keeperSpeed: 7,  aiMissChance: 0.72, rivalSeekerFactor: 0.42, label: 'Casual (Hero)' },
+        normal: { aiSpeed: 24, snitchSpeed: 30, bludgerSpeed: 24, keeperSpeed: 11, aiMissChance: 0.55, rivalSeekerFactor: 0.55, label: 'Standard' },
+        hard:   { aiSpeed: 33, snitchSpeed: 40, bludgerSpeed: 34, keeperSpeed: 18, aiMissChance: 0.30, rivalSeekerFactor: 0.75, label: 'Expert' }
+    };
+
+    // --- 2. PROCEDURAL WEB AUDIO SYNTHESIZER & ORCHESTRAL MUSIC ENGINE ---
+    class SoundEngine {
+        constructor() {
+            this.ctx = null;
+            this.muted = false;
+            this.musicEnabled = true;
+            this.windGain = null;
+            this.windFilter = null;
+            this.musicGain = null;
+            this.musicTimer = null;
+            this.noteIndex = 0;
+            this.initialized = false;
+        }
+
+        init() {
+            if (this.initialized) return;
+            try {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                this.ctx = new AudioCtx();
+
+                // Continuous procedural wind noise for flight sensation
+                const bufferSize = this.ctx.sampleRate * 2;
+                const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const output = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    output[i] = Math.random() * 2 - 1;
+                }
+
+                const whiteNoise = this.ctx.createBufferSource();
+                whiteNoise.buffer = noiseBuffer;
+                whiteNoise.loop = true;
+
+                this.windFilter = this.ctx.createBiquadFilter();
+                this.windFilter.type = 'bandpass';
+                this.windFilter.frequency.value = 280;
+                this.windFilter.Q.value = 2.5;
+
+                this.windGain = this.ctx.createGain();
+                this.windGain.gain.value = 0.0;
+
+                whiteNoise.connect(this.windFilter);
+                this.windFilter.connect(this.windGain);
+                this.windGain.connect(this.ctx.destination);
+                whiteNoise.start(0);
+
+                // Orchestral Music Master Gain
+                this.musicGain = this.ctx.createGain();
+                this.musicGain.gain.value = 0.14;
+                this.musicGain.connect(this.ctx.destination);
+
+                this.initialized = true;
+                this.startOrchestralMusic();
+            } catch (e) {
+                console.warn('Web Audio unavailable:', e);
+            }
+        }
+
+        resume() {
+            if (this.ctx && this.ctx.state === 'suspended') {
+                this.ctx.resume();
+            }
+        }
+
+        toggleMute() {
+            this.muted = !this.muted;
+            if (this.windGain && this.ctx) {
+                this.windGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
+            }
+            if (this.musicGain && this.ctx) {
+                this.musicGain.gain.setTargetAtTime(this.muted || !this.musicEnabled ? 0 : 0.14, this.ctx.currentTime, 0.05);
+            }
+            return this.muted;
+        }
+
+        toggleMusic() {
+            this.musicEnabled = !this.musicEnabled;
+            if (this.musicGain && this.ctx) {
+                this.musicGain.gain.setTargetAtTime(this.muted || !this.musicEnabled ? 0 : 0.14, this.ctx.currentTime, 0.05);
+            }
+            return this.musicEnabled;
+        }
+
+        // Sweeping Magical Quidditch Orchestral Loop (Celesta + Brass/Strings)
+        startOrchestralMusic() {
+            if (this.musicTimer) clearInterval(this.musicTimer);
+            // Heroic 3/4 waltz-march magical theme in E minor / G major
+            const melody = [
+                { f: 246.94, d: 0.35 }, { f: 329.63, d: 0.50 }, { f: 392.00, d: 0.22 }, { f: 369.99, d: 0.35 },
+                { f: 329.63, d: 0.65 }, { f: 493.88, d: 0.35 }, { f: 440.00, d: 0.85 }, { f: 369.99, d: 0.85 },
+                { f: 329.63, d: 0.50 }, { f: 392.00, d: 0.22 }, { f: 369.99, d: 0.35 }, { f: 293.66, d: 0.65 },
+                { f: 349.23, d: 0.35 }, { f: 246.94, d: 1.10 }, { f: 0, d: 0.35 },
+                { f: 246.94, d: 0.35 }, { f: 329.63, d: 0.50 }, { f: 392.00, d: 0.22 }, { f: 369.99, d: 0.35 },
+                { f: 329.63, d: 0.65 }, { f: 493.88, d: 0.35 }, { f: 587.33, d: 0.65 }, { f: 554.37, d: 0.35 },
+                { f: 523.25, d: 0.65 }, { f: 415.30, d: 0.35 }, { f: 523.25, d: 0.50 }, { f: 493.88, d: 0.22 },
+                { f: 466.16, d: 0.35 }, { f: 233.08, d: 0.65 }, { f: 392.00, d: 0.35 }, { f: 329.63, d: 1.10 }
+            ];
+
+            const playNextNote = () => {
+                if (!this.initialized || this.muted || !this.musicEnabled || !this.ctx) return;
+                if (this.ctx.state === 'suspended') return;
+
+                const note = melody[this.noteIndex % melody.length];
+                this.noteIndex++;
+                if (note.f > 0) {
+                    const now = this.ctx.currentTime;
+                    // Celesta bell tone
+                    const osc1 = this.ctx.createOscillator();
+                    const osc2 = this.ctx.createOscillator();
+                    const noteGain = this.ctx.createGain();
+
+                    osc1.type = 'sine';
+                    osc1.frequency.setValueAtTime(note.f, now);
+
+                    osc2.type = 'triangle';
+                    osc2.frequency.setValueAtTime(note.f * 2, now); // Octave shimmer
+
+                    const subGain = this.ctx.createGain();
+                    subGain.gain.value = 0.28;
+
+                    noteGain.gain.setValueAtTime(0.001, now);
+                    noteGain.gain.linearRampToValueAtTime(0.55, now + 0.04);
+                    noteGain.gain.exponentialRampToValueAtTime(0.001, now + note.d * 1.35);
+
+                    osc1.connect(noteGain);
+                    osc2.connect(subGain);
+                    subGain.connect(noteGain);
+                    noteGain.connect(this.musicGain);
+
+                    osc1.start(now);
+                    osc2.start(now);
+                    osc1.stop(now + note.d * 1.4);
+                    osc2.stop(now + note.d * 1.4);
+                }
+            };
+
+            this.musicTimer = setInterval(playNextNote, 360);
+        }
+
+        playCrowdCheer() {
+            if (!this.initialized || this.muted) return;
+            const now = this.ctx.currentTime;
+            const bufferSize = this.ctx.sampleRate * 1.6;
+            const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = (Math.random() * 2 - 1) * Math.sin((i / bufferSize) * Math.PI);
+            }
+            const noise = this.ctx.createBufferSource();
+            noise.buffer = buffer;
+
+            const filter = this.ctx.createBiquadFilter();
+            filter.type = 'bandpass';
+            filter.frequency.setValueAtTime(650, now);
+            filter.Q.value = 0.9;
+
+            const gain = this.ctx.createGain();
+            gain.gain.setValueAtTime(0.01, now);
+            gain.gain.linearRampToValueAtTime(0.22, now + 0.35);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 1.55);
+
+            noise.connect(filter);
+            filter.connect(gain);
+            gain.connect(this.ctx.destination);
+            noise.start(now);
+        }
+
+        playAnnouncerChime() {
+            if (!this.initialized || this.muted) return;
+            const now = this.ctx.currentTime;
+            [587.33, 880].forEach((freq, i) => {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, now + i * 0.08);
+                gain.gain.setValueAtTime(0.11, now + i * 0.08);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.32);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now + i * 0.08);
+                osc.stop(now + i * 0.08 + 0.34);
+            });
+        }
+
+        playBludgerHit() {
+            if (!this.initialized || this.muted) return;
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(115, now);
+            osc.frequency.exponentialRampToValueAtTime(38, now + 0.35);
+            gain.gain.setValueAtTime(0.28, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.4);
+        }
+
+        playSnitchShimmer() {
+            if (!this.initialized || this.muted) return;
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1320 + Math.random() * 440, now);
+            gain.gain.setValueAtTime(0.04, now);
+            gain.gain.exponentialRampToValueAtTime(0.0005, now + 0.18);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.19);
+        }
+
+        playVictory() {
+            if (!this.initialized || this.muted) return;
+            const fanfare = [523.25, 659.25, 783.99, 1046.5, 783.99, 1046.5];
+            const times = [0, 0.13, 0.26, 0.40, 0.60, 0.76];
+            fanfare.forEach((freq, i) => {
+                const now = this.ctx.currentTime + times[i];
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(freq, now);
+                gain.gain.setValueAtTime(0.25, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.56);
+            });
+        }
+
+        updateWind(speedRatio, active) {
+            if (!this.initialized || !this.windGain || !this.ctx) return;
+            const now = this.ctx.currentTime;
+            if (this.muted || !active) {
+                this.windGain.gain.setTargetAtTime(0, now, 0.08);
+                return;
+            }
+            const clamped = Math.max(0, Math.min(1.5, speedRatio));
+            this.windGain.gain.setTargetAtTime(0.02 + clamped * 0.08, now, 0.08);
+            if (this.windFilter) {
+                this.windFilter.frequency.setTargetAtTime(240 + clamped * 460, now, 0.08);
+            }
+        }
+
+        playGrab() {
+            if (!this.initialized || this.muted) return;
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(340, now);
+            osc.frequency.exponentialRampToValueAtTime(680, now + 0.14);
+            gain.gain.setValueAtTime(0.16, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.17);
+        }
+
+        playThrow() {
+            if (!this.initialized || this.muted) return;
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(520, now);
+            osc.frequency.exponentialRampToValueAtTime(190, now + 0.22);
+            gain.gain.setValueAtTime(0.18, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.25);
+        }
+
+        playBoost() {
+            if (!this.initialized || this.muted) return;
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(160, now);
+            osc.frequency.exponentialRampToValueAtTime(420, now + 0.28);
+            gain.gain.setValueAtTime(0.1, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.32);
+        }
+
+        playGoal(isPlayer) {
+            if (!this.initialized || this.muted) return;
+            const notes = isPlayer ? [523.25, 659.25, 783.99] : [330, 277.18, 220];
+            notes.forEach((freq, i) => {
+                const now = this.ctx.currentTime + i * 0.09;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(freq, now);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.34);
+            });
+        }
+    }
+
+    const sound = new SoundEngine();
+
+    // --- 3. GLOBAL GAME STATE ---
+    const PITCH_HALF_W = 95;   // X axis (-95 to +95)
+    const PITCH_HALF_L = 175;  // Z axis (-175 to +175). Player attacks -Z hoops, defends +Z hoops
+    const MAX_ALTITUDE = 95;
+    const MIN_ALTITUDE = 4.5;
+
+    const state = {
+        mode: 'menu', // 'menu' | 'intro' | 'playing' | 'paused' | 'gameover'
+        selectedHouse: 'gryffindor',
+        difficulty: 'easy', // Default to Casual (Hero) so player feels powerful and wins unless terrible
+        introTimer: 0,
+        introStage: 0,
+        playerScore: 0,
+        aiScore: 0,
+        timeRemaining: 180, // 3 minutes
+        goalsScored: 0,
+        snitchCaught: false,
+        bludgerHits: 0,
+        boostEnergy: 100,
+        isBoosting: false,
+        stunTimer: 0,
+        cameraShake: 0,
+        lastShimmerTime: 0
+    };
+
+    // Input Tracking
+    const keys = {};
+    const mouse = { x: 0, y: 0, active: false };
+    const touchInput = { pitch: 0, yaw: 0, brake: false, boost: false };
+
+    // --- 4. THREE.JS SCENE, RENDERER & LIGHTING ---
+    const canvas = document.getElementById('game-canvas');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.08;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x6eb5ff);
+    scene.fog = new THREE.FogExp2(0x8ecae6, 0.0019);
+
+    const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.5, 900);
+
+    // Three-point / Hemisphere + Sun Lighting
+    const hemiLight = new THREE.HemisphereLight(0xdbeafe, 0x166534, 0.85);
+    hemiLight.position.set(0, 150, 0);
+    scene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xfffbeb, 1.25);
+    dirLight.position.set(110, 190, 90);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.camera.near = 20;
+    dirLight.shadow.camera.far = 520;
+    const d = 210;
+    dirLight.shadow.camera.left = -d;
+    dirLight.shadow.camera.right = d;
+    dirLight.shadow.camera.top = d;
+    dirLight.shadow.camera.bottom = -d;
+    dirLight.shadow.bias = -0.0005;
+    scene.add(dirLight);
+
+    // --- 5. VOXEL BUILDER HELPERS ---
+    const boxGeoCache = {};
+    function getBoxGeo(w, h, d) {
+        const key = `${w}_${h}_${d}`;
+        if (!boxGeoCache[key]) {
+            boxGeoCache[key] = new THREE.BoxGeometry(w, h, d);
+        }
+        return boxGeoCache[key];
+    }
+
+    const matCache = {};
+    function getMat(color, emissive = 0x000000, emissiveIntensity = 0, roughness = 0.75, metalness = 0.05) {
+        const key = `${color}_${emissive}_${emissiveIntensity}_${roughness}_${metalness}`;
+        if (!matCache[key]) {
+            matCache[key] = new THREE.MeshStandardMaterial({
+                color,
+                emissive,
+                emissiveIntensity,
+                roughness,
+                metalness
+            });
+        }
+        return matCache[key];
+    }
+
+    function createVoxelMesh(w, h, d, color, x = 0, y = 0, z = 0, options = {}) {
+        const mesh = new THREE.Mesh(
+            getBoxGeo(w, h, d),
+            getMat(color, options.emissive || 0, options.emissiveIntensity || 0, options.roughness ?? 0.75, options.metalness ?? 0.05)
+        );
+        mesh.position.set(x, y, z);
+        if (options.castShadow !== false) mesh.castShadow = true;
+        if (options.receiveShadow !== false) mesh.receiveShadow = true;
+        return mesh;
+    }
+
+    // --- 6. BUILD THE VOXEL QUIDDITCH STADIUM & HOGWARTS ENVIRONMENT ---
+    const targetHoops = []; // Opposing hoops at Z = -148 (Player shoots here)
+    const homeHoops = [];   // Player's own hoops at Z = +148 (AI shoots here)
+    const stadiumBanners = [];
+    const crowdVoxels = []; // Animated jumping spectators in stands
+    const ambientMotes = []; // Floating sunbeam golden motes/confetti
+
+    function buildStadium() {
+        const envGroup = new THREE.Group();
+
+        // 1. Lush Voxel Grass Pitch with Mowed Stripes
+        const stripeCount = 14;
+        const stripeDepth = (PITCH_HALF_L * 2) / stripeCount;
+        for (let i = 0; i < stripeCount; i++) {
+            const zPos = -PITCH_HALF_L + stripeDepth * (i + 0.5);
+            const shade = i % 2 === 0 ? 0x2e8b57 : 0x389e64;
+            const strip = createVoxelMesh(PITCH_HALF_W * 2, 2, stripeDepth, shade, 0, -1, zPos, { castShadow: false });
+            envGroup.add(strip);
+        }
+
+        // Outer surrounding meadow ground
+        const outerGround = createVoxelMesh(1400, 2, 1400, 0x1e5631, 0, -2.2, 0, { castShadow: false });
+        envGroup.add(outerGround);
+
+        // 2. Crisp White Voxel Pitch Markings
+        const lineMatY = 0.08;
+        // Center circle approximation (voxel octagon) & center line
+        envGroup.add(createVoxelMesh(PITCH_HALF_W * 1.9, 0.2, 1.4, 0xf8fafc, 0, lineMatY, 0, { castShadow: false }));
+        const ringSegments = 16;
+        for (let i = 0; i < ringSegments; i++) {
+            const a = (i / ringSegments) * Math.PI * 2;
+            const rx = Math.cos(a) * 24;
+            const rz = Math.sin(a) * 24;
+            const seg = createVoxelMesh(4, 0.2, 4, 0xf8fafc, rx, lineMatY, rz, { castShadow: false });
+            seg.rotation.y = -a;
+            envGroup.add(seg);
+        }
+        // Scoring zone lines
+        envGroup.add(createVoxelMesh(PITCH_HALF_W * 1.9, 0.2, 1.4, 0xf8fafc, 0, lineMatY, -135, { castShadow: false }));
+        envGroup.add(createVoxelMesh(PITCH_HALF_W * 1.9, 0.2, 1.4, 0xf8fafc, 0, lineMatY, 135, { castShadow: false }));
+
+        // 3. Six Golden Voxel Goal Hoops (3 at Z = -148, 3 at Z = +148)
+        function createHoopAssembly(x, poleHeight, ringRadius, z, isTarget) {
+            const hoopGroup = new THREE.Group();
+            hoopGroup.position.set(x, 0, z);
+
+            // Tall golden pole
+            const pole = createVoxelMesh(1.8, poleHeight, 1.8, 0xd97706, 0, poleHeight / 2, 0, { metalness: 0.6, roughness: 0.3 });
+            hoopGroup.add(pole);
+
+            // Voxelized Golden Ring at top of pole
+            const ringCenterY = poleHeight + ringRadius;
+            const voxelsInRing = 20;
+            for (let i = 0; i < voxelsInRing; i++) {
+                const theta = (i / voxelsInRing) * Math.PI * 2;
+                const vx = Math.cos(theta) * ringRadius;
+                const vy = ringCenterY + Math.sin(theta) * ringRadius;
+                const vBlock = createVoxelMesh(
+                    2.1, 2.1, 2.1,
+                    0xfbbf24,
+                    vx, vy, 0,
+                    { emissive: 0xb45309, emissiveIntensity: 0.25, metalness: 0.7, roughness: 0.25 }
+                );
+                hoopGroup.add(vBlock);
+            }
+
+            envGroup.add(hoopGroup);
+
+            const hoopData = {
+                position: new THREE.Vector3(x, ringCenterY, z),
+                radius: ringRadius + 2.2 // Generous scoring hitbox
+            };
+            if (isTarget) targetHoops.push(hoopData);
+            else homeHoops.push(hoopData);
+        }
+
+        const hoopConfigs = [
+            { x: -32, h: 24, r: 8.5 },
+            { x: 0,   h: 36, r: 9.5 },
+            { x: 32,  h: 20, r: 8.5 }
+        ];
+        hoopConfigs.forEach(cfg => {
+            createHoopAssembly(cfg.x, cfg.h, cfg.r, -148, true);
+            createHoopAssembly(cfg.x, cfg.h, cfg.r, 148, false);
+        });
+
+        // 4. Voxel Stadium Spectator Towers & House Banners around Perimeter
+        const towerCount = 16;
+        for (let i = 0; i < towerCount; i++) {
+            const angle = (i / towerCount) * Math.PI * 2;
+            const tx = Math.cos(angle) * (PITCH_HALF_W + 26);
+            const tz = Math.sin(angle) * (PITCH_HALF_L + 26);
+            const towerH = 44 + (i % 3) * 10;
+
+            const tower = new THREE.Group();
+            tower.position.set(tx, 0, tz);
+            tower.lookAt(0, 0, 0);
+
+            // Stone/wood base tower
+            tower.add(createVoxelMesh(18, towerH, 18, 0x475569, 0, towerH / 2, 0));
+            // Spectator viewing box
+            tower.add(createVoxelMesh(21, 8, 21, 0x78350f, 0, towerH + 2, 0));
+            // Pointed Voxel Spire Roof
+            tower.add(createVoxelMesh(16, 6, 16, 0x1e293b, 0, towerH + 9, 0));
+            tower.add(createVoxelMesh(10, 6, 10, 0x1e293b, 0, towerH + 15, 0));
+            tower.add(createVoxelMesh(4, 6, 4, 0xfbbf24, 0, towerH + 21, 0));
+
+            // Hanging House Banner (alternates Player House & Rival House)
+            const isPlayerBanner = i % 2 === 0;
+            const bannerMesh = createVoxelMesh(10, 22, 1.2, isPlayerBanner ? 0x991b1b : 0x065f46, 0, towerH - 12, 9.8);
+            const trimMesh = createVoxelMesh(10, 4, 1.4, isPlayerBanner ? 0xfbbf24 : 0xd1d5db, 0, towerH - 22, 9.8);
+            tower.add(bannerMesh);
+            tower.add(trimMesh);
+            stadiumBanners.push({ bannerMesh, trimMesh, isPlayerBanner });
+
+            // Animated Voxel Crowd spectators cheering in stands
+            for (let c = -6; c <= 6; c += 3) {
+                const crowdColors = [0xfef08a, 0xfca5a5, 0x93c5fd, 0x86efac, 0xfde047];
+                const col = crowdColors[Math.abs(c + i) % crowdColors.length];
+                const spec = createVoxelMesh(2.2, 3.6, 2.2, col, c, towerH + 7, 7.2);
+                tower.add(spec);
+                crowdVoxels.push({ mesh: spec, baseY: towerH + 7, phase: i * 0.7 + c });
+            }
+
+            envGroup.add(tower);
+        }
+
+        // Stone Entrance Tunnel Gate at South-East Corner (Players walk out through here!)
+        const tunnelGroup = new THREE.Group();
+        tunnelGroup.position.set(0, 0, PITCH_HALF_L + 14);
+        // Left & Right Stone Pillars + Archway Roof
+        tunnelGroup.add(createVoxelMesh(6, 18, 26, 0x334155, -8, 9, 0));
+        tunnelGroup.add(createVoxelMesh(6, 18, 26, 0x334155, 8, 9, 0));
+        tunnelGroup.add(createVoxelMesh(22, 5, 26, 0x1e293b, 0, 19.5, 0));
+        // Golden Torch Brazier accents inside tunnel
+        tunnelGroup.add(createVoxelMesh(1.5, 1.5, 1.5, 0xfbbf24, -4.5, 11, -6, { emissive: 0xf59e0b, emissiveIntensity: 1.0 }));
+        tunnelGroup.add(createVoxelMesh(1.5, 1.5, 1.5, 0xfbbf24, 4.5, 11, -6, { emissive: 0xf59e0b, emissiveIntensity: 1.0 }));
+        tunnelGroup.add(createVoxelMesh(1.5, 1.5, 1.5, 0xfbbf24, -4.5, 11, 6, { emissive: 0xf59e0b, emissiveIntensity: 1.0 }));
+        tunnelGroup.add(createVoxelMesh(1.5, 1.5, 1.5, 0xfbbf24, 4.5, 11, 6, { emissive: 0xf59e0b, emissiveIntensity: 1.0 }));
+        envGroup.add(tunnelGroup);
+
+        // Low perimeter stadium wall (with gap at Z = +PITCH_HALF_L+12 for tunnel exit)
+        envGroup.add(createVoxelMesh(4, 8, PITCH_HALF_L * 2 + 24, 0x64748b, -PITCH_HALF_W - 12, 4, 0));
+        envGroup.add(createVoxelMesh(4, 8, PITCH_HALF_L * 2 + 24, 0x64748b, PITCH_HALF_W + 12, 4, 0));
+        envGroup.add(createVoxelMesh(PITCH_HALF_W * 2 + 28, 8, 4, 0x64748b, 0, 4, -PITCH_HALF_L - 12));
+        envGroup.add(createVoxelMesh(PITCH_HALF_W - 6, 8, 4, 0x64748b, -PITCH_HALF_W / 2 - 9, 4, PITCH_HALF_L + 12));
+        envGroup.add(createVoxelMesh(PITCH_HALF_W - 6, 8, 4, 0x64748b, PITCH_HALF_W / 2 + 9, 4, PITCH_HALF_L + 12));
+        // 6. Floating Voxel Clouds
+        for (let i = 0; i < 18; i++) {
+            const cloud = new THREE.Group();
+            const cx = (Math.random() - 0.5) * 650;
+            const cy = 125 + Math.random() * 65;
+            const cz = (Math.random() - 0.5) * 650;
+            cloud.position.set(cx, cy, cz);
+            cloud.add(createVoxelMesh(28, 7, 16, 0xffffff, 0, 0, 0, { castShadow: false, roughness: 0.95 }));
+            cloud.add(createVoxelMesh(18, 9, 12, 0xf1f5f9, 5, 4, 2, { castShadow: false, roughness: 0.95 }));
+            envGroup.add(cloud);
+        }
+
+        // 7. Ambient Golden Sunbeam Dust Motes across the Pitch
+        for (let i = 0; i < 55; i++) {
+            const mote = createVoxelMesh(0.45, 0.45, 0.45, 0xfef08a,
+                (Math.random() - 0.5) * PITCH_HALF_W * 1.8,
+                5 + Math.random() * 65,
+                (Math.random() - 0.5) * PITCH_HALF_L * 1.8,
+                { emissive: 0xfbbf24, emissiveIntensity: 0.85, castShadow: false }
+            );
+            envGroup.add(mote);
+            ambientMotes.push({ mesh: mote, baseY: mote.position.y, speed: 0.6 + Math.random() * 1.2, phase: Math.random() * Math.PI * 2 });
+        }
+
+        scene.add(envGroup);
+    }
+
+    function updateStadiumColors(playerHouseKey) {
+        const pHouse = HOUSES[playerHouseKey];
+        const aiHouse = HOUSES[pHouse.rival];
+        stadiumBanners.forEach(b => {
+            const col = b.isPlayerBanner ? pHouse.primary : aiHouse.primary;
+            const trim = b.isPlayerBanner ? pHouse.secondary : aiHouse.secondary;
+            b.bannerMesh.material = getMat(col);
+            b.trimMesh.material = getMat(trim);
+        });
+    }
+
+    // --- 7. VOXEL CHARACTER & BROOMSTICK MODEL FACTORY ---
+    function createVoxelFlyer(primaryColor, secondaryColor, isPlayer = false) {
+        const root = new THREE.Group();
+
+        // Broomstick Handle (points along -Z forward)
+        const handle = createVoxelMesh(0.35, 0.35, 5.4, 0x78350f, 0, -0.4, 0);
+        // Golden Foot Stirrups
+        const stirrupL = createVoxelMesh(0.15, 0.45, 0.15, 0xfbbf24, -0.35, -0.65, 0.4, { metalness: 0.8 });
+        const stirrupR = createVoxelMesh(0.15, 0.45, 0.15, 0xfbbf24, 0.35, -0.65, 0.4, { metalness: 0.8 });
+        root.add(handle, stirrupL, stirrupR);
+
+        // Broom Twigs Tail (+Z back)
+        const twigs = createVoxelMesh(0.95, 0.85, 1.9, 0xb45309, 0, -0.35, 2.95);
+        const goldBand = createVoxelMesh(0.48, 0.48, 0.25, 0xfbbf24, 0, -0.4, 2.0, { metalness: 0.8 });
+        root.add(twigs, goldBand);
+
+        // Wizard Torso / Robes
+        const torso = createVoxelMesh(1.3, 1.6, 0.9, primaryColor, 0, 0.65, 0.1);
+        root.add(torso);
+
+        // House Scarf / Trim
+        const scarf = createVoxelMesh(1.4, 0.35, 1.0, secondaryColor, 0, 1.35, 0.1);
+        root.add(scarf);
+
+        // Flowing Cape (pivots at shoulders for flight animation)
+        const capePivot = new THREE.Group();
+        capePivot.position.set(0, 1.4, 0.55);
+        const capeMain = createVoxelMesh(1.35, 0.18, 2.2, primaryColor, 0, 0, 1.1);
+        const capeTrim = createVoxelMesh(1.35, 0.2, 0.35, secondaryColor, 0, 0, 2.1);
+        capePivot.add(capeMain, capeTrim);
+        root.add(capePivot);
+
+        // Wizard Head & Hair
+        const head = createVoxelMesh(1.05, 1.05, 1.05, 0xfde68a, 0, 2.0, -0.05);
+        const hair = createVoxelMesh(1.15, 0.45, 1.15, isPlayer ? 0x1e1b18 : 0xd97706, 0, 2.45, 0.02);
+        root.add(head, hair);
+
+        // Arms reaching forward to grip broom
+        const leftArm = createVoxelMesh(0.38, 0.38, 1.3, primaryColor, -0.75, 0.75, -0.55);
+        const rightArm = createVoxelMesh(0.38, 0.38, 1.3, primaryColor, 0.75, 0.75, -0.55);
+        root.add(leftArm, rightArm);
+
+        // Legs straddling broom
+        const leftLeg = createVoxelMesh(0.4, 1.1, 0.45, 0x1e293b, -0.48, -0.35, 0.3);
+        const rightLeg = createVoxelMesh(0.4, 1.1, 0.45, 0x1e293b, 0.48, -0.35, 0.3);
+        root.add(leftLeg, rightLeg);
+
+        return { root, capePivot, torso, scarf, capeMain, capeTrim, leftArm, rightArm };
+    }
+
+    function recolorFlyer(flyerObj, primaryColor, secondaryColor) {
+        flyerObj.torso.material = getMat(primaryColor);
+        flyerObj.capeMain.material = getMat(primaryColor);
+        flyerObj.leftArm.material = getMat(primaryColor);
+        flyerObj.rightArm.material = getMat(primaryColor);
+        flyerObj.scarf.material = getMat(secondaryColor);
+        flyerObj.capeTrim.material = getMat(secondaryColor);
+    }
+
+    // --- 8. ENTITIES: PLAYER, AI TEAMMATES/OPPONENTS, BALLS & PARTICLES ---
+    buildStadium();
+
+    // Player Entity
+    const playerModel = createVoxelFlyer(HOUSES.gryffindor.primary, HOUSES.gryffindor.secondary, true);
+    scene.add(playerModel.root);
+
+    const player = {
+        pos: new THREE.Vector3(0, 28, 65),
+        vel: new THREE.Vector3(0, 0, -25),
+        yaw: 0,
+        pitch: 0,
+        roll: 0,
+        speed: 32,
+        hasQuaffle: false
+    };
+
+    // Quaffle (Red Voxel Ball)
+    const quaffleMesh = createVoxelMesh(2.2, 2.2, 2.2, 0xdc2626, 0, 25, 0, {
+        emissive: 0x7f1d1d,
+        emissiveIntensity: 0.3,
+        roughness: 0.4
+    });
+    scene.add(quaffleMesh);
+
+    const quaffle = {
+        pos: new THREE.Vector3(0, 25, 0),
+        vel: new THREE.Vector3(0, 0, 0),
+        holder: null, // 'player' | aiAgent object | null
+        pickupCooldown: 0
+    };
+
+    // Golden Snitch (Glowing Voxel Sphere + Flapping Voxel Wings)
+    const snitchGroup = new THREE.Group();
+    const snitchCore = createVoxelMesh(1.1, 1.1, 1.1, 0xfef08a, 0, 0, 0, {
+        emissive: 0xfbbf24,
+        emissiveIntensity: 0.9,
+        metalness: 0.9,
+        roughness: 0.1
+    });
+    const wingLeft = createVoxelMesh(2.2, 0.15, 0.65, 0xffffff, -1.3, 0.2, 0, { emissive: 0xfef9c3, emissiveIntensity: 0.5 });
+    const wingRight = createVoxelMesh(2.2, 0.15, 0.65, 0xffffff, 1.3, 0.2, 0, { emissive: 0xfef9c3, emissiveIntensity: 0.5 });
+    snitchGroup.add(snitchCore, wingLeft, wingRight);
+    scene.add(snitchGroup);
+
+    const snitch = {
+        pos: new THREE.Vector3(0, 42, -30),
+        vel: new THREE.Vector3(18, 4, -18),
+        targetPos: new THREE.Vector3(25, 45, -40),
+        evadeTimer: 0
+    };
+
+    // Two Rogue Bludgers (Dark Iron Voxel Spheres)
+    const bludgers = [];
+    for (let i = 0; i < 2; i++) {
+        const bMesh = createVoxelMesh(2.4, 2.4, 2.4, 0x1e293b, 0, 30, 0, {
+            emissive: 0x450a0a,
+            emissiveIntensity: 0.35,
+            metalness: 0.85,
+            roughness: 0.25
+        });
+        scene.add(bMesh);
+        bludgers.push({
+            mesh: bMesh,
+            pos: new THREE.Vector3(i === 0 ? -40 : 40, 30, i === 0 ? -20 : 20),
+            vel: new THREE.Vector3(0, 0, 0)
+        });
+    }
+
+    // Full 14-Player Lineup Group (7 Home + 7 Rival standing on pitch for Ceremony)
+    const lineupGroup = new THREE.Group();
+    scene.add(lineupGroup);
+
+    function buildTeamLineup() {
+        while (lineupGroup.children.length > 0) {
+            lineupGroup.remove(lineupGroup.children[0]);
+        }
+        const pHouse = HOUSES[state.selectedHouse];
+        const rHouse = HOUSES[pHouse.rival];
+
+        for (let i = 0; i < 7; i++) {
+            const xOffset = (i - 3) * 5.2;
+
+            // Player's House 7-player squad standing at Z = +12 facing -Z
+            const homeMember = createVoxelFlyer(pHouse.primary, pHouse.secondary, i === 3);
+            homeMember.root.position.set(xOffset, 1.8, 12);
+            homeMember.root.rotation.set(0, 0, 0);
+            lineupGroup.add(homeMember.root);
+
+            // Rival House 7-player squad standing at Z = -12 facing +Z
+            const rivalMember = createVoxelFlyer(rHouse.primary, rHouse.secondary, false);
+            rivalMember.root.position.set(xOffset, 1.8, -12);
+            rivalMember.root.rotation.set(0, Math.PI, 0);
+            lineupGroup.add(rivalMember.root);
+        }
+        lineupGroup.visible = true;
+    }
+
+    // AI Agents (Opposing Chasers, Rival Seeker, Opposing Keeper, and Teammate Chaser)
+    const aiAgents = [];
+
+    function initAIAgents() {
+        aiAgents.forEach(a => scene.remove(a.model.root));
+        aiAgents.length = 0;
+
+        const pHouse = HOUSES[state.selectedHouse];
+        const rHouse = HOUSES[pHouse.rival];
+
+        const configs = [
+            { role: 'rival_keeper', primary: rHouse.primary, secondary: rHouse.secondary, pos: new THREE.Vector3(0, 32, -142) },
+            { role: 'rival_seeker', primary: rHouse.primary, secondary: rHouse.secondary, pos: new THREE.Vector3(-25, 45, -60) },
+            { role: 'rival_chaser', primary: rHouse.primary, secondary: rHouse.secondary, pos: new THREE.Vector3(24, 28, -45) },
+            { role: 'ally_chaser',  primary: pHouse.primary, secondary: pHouse.secondary, pos: new THREE.Vector3(-22, 28, 45) }
+        ];
+
+        configs.forEach(cfg => {
+            const model = createVoxelFlyer(cfg.primary, cfg.secondary, false);
+            model.root.position.copy(cfg.pos);
+            scene.add(model.root);
+            aiAgents.push({
+                role: cfg.role,
+                model,
+                pos: cfg.pos.clone(),
+                vel: new THREE.Vector3(),
+                yaw: cfg.role === 'ally_chaser' ? 0 : Math.PI,
+                hasQuaffle: false
+            });
+        });
+    }
+
+    // --- 9. PARTICLE EFFECTS SYSTEM (Boost Sparks, Snitch Glint, Explosions) ---
+    const particles = [];
+    const particleGeo = new THREE.BoxGeometry(0.55, 0.55, 0.55);
+
+    function spawnParticles(pos, color, count = 8, speed = 12, life = 0.55) {
+        const mat = getMat(color, color, 0.8);
+        for (let i = 0; i < count; i++) {
+            const mesh = new THREE.Mesh(particleGeo, mat);
+            mesh.position.copy(pos);
+            scene.add(mesh);
+            particles.push({
+                mesh,
+                vel: new THREE.Vector3(
+                    (Math.random() - 0.5) * speed,
+                    (Math.random() - 0.5) * speed,
+                    (Math.random() - 0.5) * speed
+                ),
+                life,
+                maxLife: life
+            });
+        }
+    }
+
+    function updateParticles(dt) {
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.life -= dt;
+            if (p.life <= 0) {
+                scene.remove(p.mesh);
+                particles.splice(i, 1);
+            } else {
+                p.mesh.position.addScaledVector(p.vel, dt);
+                const s = Math.max(0.05, p.life / p.maxLife);
+                p.mesh.scale.set(s, s, s);
+            }
+        }
+    }
+
+    // --- 10. UI NOTIFICATIONS, ANNOUNCER & HUD HELPERS ---
+    const notificationArea = document.getElementById('notification-area');
+    let announcerHideTimeout = null;
+
+    function announce(message, speak = false) {
+        const box = document.getElementById('announcer-box');
+        const textEl = document.getElementById('announcer-text');
+        const introCap = document.getElementById('intro-caption');
+        if (textEl) textEl.textContent = message;
+        if (introCap) introCap.textContent = `"${message}"`;
+
+        if (box) {
+            box.classList.remove('opacity-0');
+            box.classList.add('opacity-100');
+            if (announcerHideTimeout) clearTimeout(announcerHideTimeout);
+            announcerHideTimeout = setTimeout(() => {
+                box.classList.remove('opacity-100');
+                box.classList.add('opacity-0');
+            }, 4200);
+        }
+        sound.playAnnouncerChime();
+
+        // Optional Web Speech API voice commentary if supported & unmuted
+        if (speak && !sound.muted && 'speechSynthesis' in window) {
+            try {
+                window.speechSynthesis.cancel();
+                const utter = new SpeechSynthesisUtterance(message);
+                utter.rate = 1.12;
+                utter.pitch = 1.08;
+                utter.volume = 0.75;
+                window.speechSynthesis.speak(utter);
+            } catch (e) {}
+        }
+    }
+
+    function showNotification(text, colorClass = 'text-amber-300 border-amber-400') {
+        const el = document.createElement('div');
+        el.className = `notify-anim glass-panel px-6 py-2.5 rounded-2xl border-2 font-magic font-black text-base sm:text-xl tracking-wider uppercase shadow-xl mb-2 ${colorClass}`;
+        el.textContent = text;
+        notificationArea.appendChild(el);
+        setTimeout(() => {
+            if (el.parentNode) el.parentNode.removeChild(el);
+        }, 2400);
+    }
+
+    function updateScoreHUD() {
+        document.getElementById('hud-player-score').textContent = state.playerScore;
+        document.getElementById('hud-ai-score').textContent = state.aiScore;
+    }
+
+    // --- 11. MATCH LIFECYCLE, CINEMATIC INTRO & RESET ---
+    function startIntroCeremony() {
+        const pHouse = HOUSES[state.selectedHouse];
+        const rHouse = HOUSES[pHouse.rival];
+
+        recolorFlyer(playerModel, pHouse.primary, pHouse.secondary);
+        updateStadiumColors(state.selectedHouse);
+        buildTeamLineup();
+
+        // Hide player flight model during tunnel walk & lineup ceremony
+        playerModel.root.visible = false;
+
+        document.getElementById('menu-start').classList.add('hidden');
+        document.getElementById('menu-pause').classList.add('hidden');
+        document.getElementById('menu-gameover').classList.add('hidden');
+        document.getElementById('hud').classList.add('hidden');
+        document.getElementById('markers-layer').classList.add('hidden');
+        document.getElementById('crosshair').classList.add('hidden');
+        document.getElementById('touch-controls').classList.add('hidden');
+
+        document.getElementById('intro-overlay').classList.remove('hidden');
+        state.mode = 'intro';
+        state.introTimer = 0;
+        state.introStage = 0;
+
+        // Place camera inside the stone tunnel looking out onto the sunny pitch
+        camera.position.set(0, 4.2, PITCH_HALF_L + 24);
+        camera.lookAt(0, 6, 0);
+
+        sound.playCrowdCheer();
+        announce(`Welcome to the Hogwarts Quidditch Cup! ${pHouse.name} versus ${rHouse.name}!`, true);
+    }
+
+    function updateIntroCeremony(dt, elapsedTotal) {
+        state.introTimer += dt;
+        const t = state.introTimer;
+        const pHouse = HOUSES[state.selectedHouse];
+        const rHouse = HOUSES[pHouse.rival];
+
+        // Celebrate with confetti bursts in the stadium sky
+        if (Math.random() < 0.35) {
+            const confettiColor = Math.random() < 0.5 ? pHouse.secondary : rHouse.secondary;
+            spawnParticles(new THREE.Vector3((Math.random() - 0.5) * 90, 35 + Math.random() * 25, (Math.random() - 0.5) * 90), confettiColor, 2, 10, 1.4);
+        }
+
+        if (t < 4.2) {
+            // Stage 1: Walking out of the stone tunnel onto the vibrant grass pitch
+            document.getElementById('intro-stage-tag').textContent = 'Stage 1 of 3 • Stadium Entrance';
+            document.getElementById('intro-headline').textContent = `${pHouse.name} Enters The Pitch`;
+            const progress = t / 4.2;
+            const walkZ = THREE.MathUtils.lerp(PITCH_HALF_L + 24, 52, progress);
+            const walkBob = Math.abs(Math.sin(t * 7.5)) * 0.45;
+            camera.position.set(0, 4.0 + walkBob, walkZ);
+            camera.lookAt(0, 7 + progress * 6, -20);
+        } else if (t < 8.4) {
+            // Stage 2: Sweeping Camera Pan across the 14-Player Lineup
+            if (state.introStage === 0) {
+                state.introStage = 1;
+                document.getElementById('intro-stage-tag').textContent = 'Stage 2 of 3 • Team Lineup';
+                document.getElementById('intro-headline').textContent = `${pHouse.name} vs ${rHouse.name} Lineup`;
+                sound.playCrowdCheer();
+                announce(`Both seven-player squads take center pitch! Look at those Nimbus brooms gleaming!`, true);
+            }
+            const subT = (t - 4.2) / 4.2;
+            const panX = THREE.MathUtils.lerp(-24, 24, subT);
+            const panZ = THREE.MathUtils.lerp(24, 18, subT);
+            camera.position.set(panX, 7.5, panZ);
+            camera.lookAt(0, 3.2, -2);
+        } else if (t < 11.2) {
+            // Stage 3: Brooms Up & Golden Snitch Release!
+            if (state.introStage === 1) {
+                state.introStage = 2;
+                document.getElementById('intro-stage-tag').textContent = 'Stage 3 of 3 • Kickoff!';
+                document.getElementById('intro-headline').textContent = 'Brooms Up! Release The Balls!';
+                announce(`Madam Hooch blows the whistle! Brooms up — the match begins!`, true);
+                spawnParticles(new THREE.Vector3(0, 26, 0), 0xfbbf24, 30, 22, 1.0);
+            }
+            const subT = (t - 8.4) / 2.8;
+            camera.position.set(0, THREE.MathUtils.lerp(8, 30, subT), THREE.MathUtils.lerp(20, 86, subT));
+            camera.lookAt(0, 26, 0);
+        } else {
+            // Transition seamlessly into active flight!
+        beginActiveMatch();
+        }
+    }
+
+    function beginActiveMatch() {
+        const pHouse = HOUSES[state.selectedHouse];
+        const rHouse = HOUSES[pHouse.rival];
+
+        lineupGroup.visible = false;
+        playerModel.root.visible = true;
+        document.getElementById('intro-overlay').classList.add('hidden');
+        document.getElementById('menu-start').classList.add('hidden');
+        document.getElementById('menu-pause').classList.add('hidden');
+        document.getElementById('menu-gameover').classList.add('hidden');
+
+        // Recolor player & stadium
+        recolorFlyer(playerModel, pHouse.primary, pHouse.secondary);
+        updateStadiumColors(state.selectedHouse);
+
+        // Update HUD House names & crests
+        document.getElementById('hud-player-house').textContent = pHouse.name;
+        document.getElementById('hud-player-crest').style.backgroundColor = pHouse.hexPrimary;
+        document.getElementById('hud-ai-house').textContent = rHouse.name;
+        document.getElementById('hud-ai-crest').style.backgroundColor = rHouse.hexPrimary;
+
+        // Reset Scores & Timers
+        state.playerScore = 0;
+        state.aiScore = 0;
+        state.timeRemaining = 180;
+        state.goalsScored = 0;
+        state.snitchCaught = false;
+        state.bludgerHits = 0;
+        state.boostEnergy = 100;
+        state.isBoosting = false;
+        state.stunTimer = 0;
+        state.cameraShake = 0;
+        updateScoreHUD();
+
+        // Reset Player Position (Higher cruising speed so player feels heroic)
+        player.pos.set(0, 26, 75);
+        player.vel.set(0, 0, -35);
+        player.yaw = 0;
+        player.pitch = 0;
+        player.roll = 0;
+        player.speed = 40;
+        player.hasQuaffle = false;
+
+        // Reset Quaffle at Center Pitch
+        resetQuaffleToCenter();
+
+        // Reset Snitch
+        snitch.pos.set((Math.random() - 0.5) * 50, 42, -25);
+        snitch.vel.set(16, 3, -14);
+
+        // Reset Bludgers
+        bludgers[0].pos.set(-55, 34, -35);
+        bludgers[1].pos.set(55, 34, 35);
+
+        // Init AI
+        initAIAgents();
+
+        // Show HUD
+        document.getElementById('hud').classList.remove('hidden');
+        document.getElementById('markers-layer').classList.remove('hidden');
+        document.getElementById('crosshair').classList.remove('hidden');
+
+        if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+            document.getElementById('touch-controls').classList.remove('hidden');
+        }
+
+        state.mode = 'playing';
+        showNotification('BROOMS UP! MATCH BEGINS!', 'text-amber-300 border-amber-400');
+        announce(`And they're off! Grab the Quaffle or chase the Golden Snitch!`);
+    }
+
+    function resetMatch() {
+        beginActiveMatch();
+    }
+
+    function resetQuaffleToCenter() {
+        quaffle.holder = null;
+        player.hasQuaffle = false;
+        aiAgents.forEach(a => a.hasQuaffle = false);
+        quaffle.pos.set(0, 28, 0);
+        quaffle.vel.set(0, 6, 0);
+        quaffle.pickupCooldown = 0.8;
+    }
+
+    function endMatch(reasonText) {
+        if (state.mode === 'gameover') return;
+        state.mode = 'gameover';
+        sound.updateWind(0, false);
+
+        const pHouse = HOUSES[state.selectedHouse];
+        const rHouse = HOUSES[pHouse.rival];
+        const playerWon = state.playerScore >= state.aiScore;
+
+        if (playerWon) sound.playVictory();
+
+        document.getElementById('hud').classList.add('hidden');
+        document.getElementById('markers-layer').classList.add('hidden');
+        document.getElementById('crosshair').classList.add('hidden');
+        document.getElementById('touch-controls').classList.add('hidden');
+
+        document.getElementById('gameover-title').textContent = playerWon
+            ? `${pHouse.name.toUpperCase()} WINS!`
+            : `${rHouse.name.toUpperCase()} WINS!`;
+        document.getElementById('gameover-reason').textContent = reasonText;
+
+        document.getElementById('end-player-house').textContent = pHouse.name;
+        document.getElementById('end-player-score').textContent = state.playerScore;
+        document.getElementById('end-ai-house').textContent = rHouse.name;
+        document.getElementById('end-ai-score').textContent = state.aiScore;
+
+        document.getElementById('stat-goals').textContent = state.goalsScored;
+        document.getElementById('stat-snitch').textContent = state.snitchCaught ? 'Caught! (+150)' : 'Missed';
+        document.getElementById('stat-hits').textContent = state.bludgerHits;
+
+        document.getElementById('menu-gameover').classList.remove('hidden');
+    }
+
+    // --- 12. QUAFFLE THROWING MECHANIC (STRONG SMART HOMING) ---
+    function throwQuaffle() {
+        if (state.mode !== 'playing' || !player.hasQuaffle) return;
+
+        player.hasQuaffle = false;
+        quaffle.holder = null;
+        quaffle.pickupCooldown = 0.75;
+
+        // Forward direction from player's yaw & pitch
+        const forward = new THREE.Vector3(0, 0, -1);
+        const euler = new THREE.Euler(player.pitch, player.yaw, 0, 'YXZ');
+        forward.applyEuler(euler).normalize();
+
+        // Strong smart aim-assist: locks onto whichever of the 3 target hoops is clearest from the Keeper!
+        let bestHoop = null;
+        let bestScore = -999;
+        const keeper = aiAgents.find(a => a.role === 'rival_keeper');
+
+        targetHoops.forEach(h => {
+            const toHoop = new THREE.Vector3().subVectors(h.position, player.pos).normalize();
+            const aimAlignment = forward.dot(toHoop); // -1 to 1
+            const keeperDist = keeper ? keeper.pos.distanceTo(h.position) : 30;
+            // Prioritize hoops the player is generally facing AND farthest from the Keeper
+            const score = aimAlignment * 2.2 + (keeperDist / 40);
+            if (aimAlignment > 0.35 && score > bestScore) {
+                bestScore = score;
+                bestHoop = h;
+            }
+        });
+
+        if (bestHoop) {
+            const assistedDir = new THREE.Vector3().subVectors(bestHoop.position, player.pos).normalize();
+            forward.lerp(assistedDir, 0.92).normalize();
+        }
+
+        quaffle.pos.copy(player.pos).addScaledVector(forward, 3.2);
+        const throwSpeed = Math.max(96, player.speed + 58);
+        quaffle.vel.copy(forward).multiplyScalar(throwSpeed);
+        if (!bestHoop) quaffle.vel.y += 4.5;
+
+        sound.playThrow();
+        spawnParticles(quaffle.pos, 0xef4444, 12, 16, 0.45);
+    }
+
+    // --- 13. CORE PHYSICS & AI SIMULATION STEP ---
+    function updateGame(dt, elapsedTime) {
+        if (state.mode !== 'playing') return;
+
+        const diff = DIFFICULTY[state.difficulty];
+
+        // 1. Match Clock Countdown
+        state.timeRemaining = Math.max(0, state.timeRemaining - dt);
+        if (state.timeRemaining <= 0) {
+            endMatch("Full time! The referee blows the final whistle.");
+            return;
+        }
+        const mins = Math.floor(state.timeRemaining / 60);
+        const secs = Math.floor(state.timeRemaining % 60);
+        document.getElementById('hud-timer').textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+        // 2. Player Flight Controls & Physics (Hero Speed & Near-Instant Boost Recharge)
+        if (state.stunTimer > 0) {
+            state.stunTimer -= dt;
+            player.roll += dt * 8;
+            player.speed = Math.max(22, player.speed - 20 * dt);
+        } else {
+            // Steering Yaw (Left/Right) & Pitch (Up/Down)
+            let yawInput = 0;
+            let pitchInput = 0;
+
+            if (keys['ArrowLeft'] || keys['KeyA']) yawInput += 1;
+            if (keys['ArrowRight'] || keys['KeyD']) yawInput -= 1;
+            if (keys['ArrowUp']) pitchInput += 1;
+            if (keys['ArrowDown']) pitchInput -= 1;
+
+            // Blend smooth mouse steering when cursor moves away from center
+            if (mouse.active) {
+                if (Math.abs(mouse.x) > 0.06) yawInput -= mouse.x * 1.15;
+                if (Math.abs(mouse.y) > 0.06) pitchInput -= mouse.y * 1.05;
+            }
+
+            // Touch steering
+            yawInput += touchInput.yaw;
+            pitchInput += touchInput.pitch;
+
+            yawInput = THREE.MathUtils.clamp(yawInput, -1.4, 1.4);
+            pitchInput = THREE.MathUtils.clamp(pitchInput, -1.3, 1.3);
+
+            player.yaw += yawInput * 2.25 * dt;
+            player.pitch = THREE.MathUtils.clamp(player.pitch + pitchInput * 1.75 * dt, -1.05, 1.05);
+
+            // Banking roll proportional to turn rate
+            const targetRoll = yawInput * 0.58;
+            player.roll = THREE.MathUtils.lerp(player.roll, targetRoll, 7 * dt);
+
+            // Throttle & Turbo Boost (Generous energy pool + rapid recharge)
+            const wantsBoost = (keys['Space'] || touchInput.boost) && state.boostEnergy > 2;
+            const wantsBrake = keys['ShiftLeft'] || keys['ShiftRight'] || keys['KeyS'] || touchInput.brake;
+            const wantsAccel = keys['KeyW'];
+
+            if (wantsBoost) {
+                if (!state.isBoosting) sound.playBoost();
+                state.isBoosting = true;
+                state.boostEnergy = Math.max(0, state.boostEnergy - 18 * dt);
+            } else {
+                state.isBoosting = false;
+                state.boostEnergy = Math.min(100, state.boostEnergy + 36 * dt);
+            }
+
+            let targetSpeed = 42;
+            if (state.isBoosting) targetSpeed = 78;
+            else if (wantsBrake) targetSpeed = 14;
+            else if (wantsAccel) targetSpeed = 54;
+
+            player.speed = THREE.MathUtils.lerp(player.speed, targetSpeed, 5.2 * dt);
+        }
+
+        // Compute forward velocity vector
+        const forward = new THREE.Vector3(0, 0, -1);
+        const flightEuler = new THREE.Euler(player.pitch, player.yaw, 0, 'YXZ');
+        forward.applyEuler(flightEuler).normalize();
+
+        player.vel.copy(forward).multiplyScalar(player.speed);
+        player.pos.addScaledVector(player.vel, dt);
+
+        // Soft Stadium Boundary Containment
+        player.pos.x = THREE.MathUtils.clamp(player.pos.x, -PITCH_HALF_W + 4, PITCH_HALF_W - 4);
+        player.pos.z = THREE.MathUtils.clamp(player.pos.z, -PITCH_HALF_L + 4, PITCH_HALF_L - 4);
+        if (player.pos.y < MIN_ALTITUDE) {
+            player.pos.y = MIN_ALTITUDE;
+            if (player.pitch < 0) player.pitch *= 0.5;
+        }
+        if (player.pos.y > MAX_ALTITUDE) {
+            player.pos.y = MAX_ALTITUDE;
+            if (player.pitch > 0) player.pitch *= 0.5;
+        }
+
+        // Update Player Voxel Model Transform & Flowing Cape
+        playerModel.root.position.copy(player.pos);
+        playerModel.root.rotation.set(player.pitch, player.yaw, player.roll, 'YXZ');
+        playerModel.capePivot.rotation.x = 0.22 + (player.speed / 70) * 0.45 + Math.sin(elapsedTime * 14) * 0.08;
+
+        // Boost Particle Trail & Wind Audio
+        if (state.isBoosting) {
+            const tailPos = player.pos.clone().addScaledVector(forward, -3.2);
+            spawnParticles(tailPos, 0xfbbf24, 2, 6, 0.35);
+        }
+        sound.updateWind(player.speed / 68, true);
+
+        // Update Boost & Speed HUD
+        document.getElementById('boost-bar').style.width = `${state.boostEnergy}%`;
+        document.getElementById('hud-speed').textContent = `${Math.round(player.speed * 1.9)} MPH`;
+
+        // 3. Quaffle Physics, Possession & Hoop Scoring
+        if (quaffle.pickupCooldown > 0) quaffle.pickupCooldown -= dt;
+
+        if (quaffle.holder === 'player') {
+            player.hasQuaffle = true;
+            const holdPos = player.pos.clone().addScaledVector(forward, 1.8);
+            holdPos.y -= 0.4;
+            quaffle.pos.copy(holdPos);
+            quaffle.vel.set(0, 0, 0);
+            document.getElementById('hud-possession').textContent = 'You Have Quaffle!';
+            document.getElementById('hud-possession').className = 'text-[10px] font-bold uppercase tracking-wider text-amber-300 mt-0.5';
+            document.getElementById('action-hint').innerHTML = 'Aim toward the <span class="text-emerald-400 font-bold">Far Golden Hoops</span> and press <span class="text-amber-300 font-bold">Click / E</span> for a Homing Shot!';
+        } else if (quaffle.holder && typeof quaffle.holder === 'object') {
+            // Held by an AI Chaser
+            const holder = quaffle.holder;
+            const aiFwd = new THREE.Vector3(-Math.sin(holder.yaw), 0, -Math.cos(holder.yaw));
+            quaffle.pos.copy(holder.pos).addScaledVector(aiFwd, 1.8);
+            quaffle.vel.set(0, 0, 0);
+
+            const isAlly = holder.role === 'ally_chaser';
+            document.getElementById('hud-possession').textContent = isAlly ? 'Teammate Has Quaffle' : 'Rival Has Quaffle!';
+            document.getElementById('hud-possession').className = `text-[10px] font-bold uppercase tracking-wider ${isAlly ? 'text-emerald-400' : 'text-red-400'} mt-0.5`;
+            document.getElementById('action-hint').innerHTML = isAlly
+                ? 'Escort your teammate or hunt the <span class="text-amber-300 font-bold">Golden Snitch</span>!'
+                : 'Fly close to the Rival Chaser to <span class="text-amber-300 font-bold">Auto-Steal</span> the Quaffle!';
+
+            // Automatic Hero Bump-Steal when player flies near Rival Chaser!
+            if (!isAlly && quaffle.pickupCooldown <= 0 && player.pos.distanceTo(holder.pos) < 8.5) {
+                holder.hasQuaffle = false;
+                quaffle.holder = 'player';
+                player.hasQuaffle = true;
+                sound.playGrab();
+                spawnParticles(player.pos, 0xfbbf24, 14, 16, 0.5);
+                showNotification('STOLE THE QUAFFLE!', 'text-amber-300 border-amber-400');
+                announce(`Brilliant intercept! ${HOUSES[state.selectedHouse].name} steals the Quaffle!`);
+            }
+        } else {
+            // Free-flying Quaffle
+            document.getElementById('hud-possession').textContent = 'Quaffle Loose';
+            document.getElementById('hud-possession').className = 'text-[10px] font-semibold uppercase tracking-wider text-slate-300 mt-0.5';
+            document.getElementById('action-hint').innerHTML = 'Fly near the <span class="text-red-400 font-bold">Red Quaffle</span> to magnet-grab it, or catch the <span class="text-amber-300 font-bold">Golden Snitch</span>!';
+
+            // Gentle magnetic pull toward player when flying nearby
+            const distToPlayer = player.pos.distanceTo(quaffle.pos);
+            if (quaffle.pickupCooldown <= 0 && distToPlayer < 16) {
+                const pullDir = new THREE.Vector3().subVectors(player.pos, quaffle.pos).normalize();
+                quaffle.vel.lerp(pullDir.multiplyScalar(48), 6 * dt);
+            } else {
+                quaffle.vel.y -= 11 * dt; // Gentle magical gravity
+            }
+            quaffle.pos.addScaledVector(quaffle.vel, dt);
+
+            // Bounce off pitch floor & walls
+            if (quaffle.pos.y < 3) {
+                quaffle.pos.y = 3;
+                quaffle.vel.y = Math.abs(quaffle.vel.y) * 0.65;
+                quaffle.vel.x *= 0.85;
+                quaffle.vel.z *= 0.85;
+            }
+            if (Math.abs(quaffle.pos.x) > PITCH_HALF_W - 3) {
+                quaffle.pos.x = Math.sign(quaffle.pos.x) * (PITCH_HALF_W - 3);
+                quaffle.vel.x *= -0.7;
+            }
+            if (Math.abs(quaffle.pos.z) > PITCH_HALF_L - 3) {
+                quaffle.pos.z = Math.sign(quaffle.pos.z) * (PITCH_HALF_L - 3);
+                quaffle.vel.z *= -0.7;
+            }
+
+            // Generous 9.5m magnetic grab radius for Player
+            if (quaffle.pickupCooldown <= 0 && state.stunTimer <= 0 && distToPlayer < 9.5) {
+                quaffle.holder = 'player';
+                player.hasQuaffle = true;
+                sound.playGrab();
+                showNotification('QUAFFLE POSSESSION!', 'text-amber-300 border-amber-400');
+            }
+        }
+
+        // Check Goal Scoring (Both thrown Quaffle AND flying straight through a hoop while holding Quaffle!)
+        if (quaffle.holder !== null || quaffle.vel.lengthSq() > 4) {
+            // Check Target Hoops (Player / Ally scores +10)
+            for (const hoop of targetHoops) {
+                if (quaffle.pos.distanceTo(hoop.position) < hoop.radius + 1.8) {
+                    state.playerScore += 10;
+                    state.goalsScored += 1;
+                    state.cameraShake = 0.35;
+                    updateScoreHUD();
+                    sound.playGoal(true);
+                    sound.playCrowdCheer();
+                    spawnParticles(hoop.position, 0xfbbf24, 34, 28, 1.0);
+                    showNotification(`${HOUSES[state.selectedHouse].name} SCORES! +10 PTS`, 'text-amber-300 border-amber-400');
+                    announce(`GOAL! Ten points to ${HOUSES[state.selectedHouse].name}! What a shot!`);
+                    resetQuaffleToCenter();
+                    break;
+                }
+            }
+            // Check Home Hoops (Rival scores +10)
+            for (const hoop of homeHoops) {
+                if (quaffle.pos.distanceTo(hoop.position) < hoop.radius) {
+                    const rName = HOUSES[HOUSES[state.selectedHouse].rival].name;
+                    state.aiScore += 10;
+                    updateScoreHUD();
+                    sound.playGoal(false);
+                    spawnParticles(hoop.position, 0xef4444, 24, 22, 0.8);
+                    showNotification(`${rName} SCORES! +10 PTS`, 'text-red-400 border-red-400');
+                    announce(`${rName} slips the Quaffle through the hoop for ten points.`);
+                    resetQuaffleToCenter();
+                    break;
+                }
+            }
+        }
+
+        quaffleMesh.position.copy(quaffle.pos);
+        quaffleMesh.rotation.x += dt * 3;
+        quaffleMesh.rotation.y += dt * 4;
+
+        // 4. Golden Snitch Elusive AI & Generous Magnetic Catch Detection
+        snitch.evadeTimer -= dt;
+        const distPlayerToSnitch = player.pos.distanceTo(snitch.pos);
+
+        if (snitch.evadeTimer <= 0 || snitch.pos.distanceTo(snitch.targetPos) < 12) {
+            snitch.evadeTimer = 1.1 + Math.random() * 1.2;
+            snitch.targetPos.set(
+                (Math.random() - 0.5) * (PITCH_HALF_W * 1.45),
+                14 + Math.random() * (MAX_ALTITUDE - 26),
+                (Math.random() - 0.5) * (PITCH_HALF_L * 1.45)
+            );
+        }
+
+        // Snitch flutters playfully but slows down when player boosts near so player can catch it!
+        const desiredSnitchDir = new THREE.Vector3().subVectors(snitch.targetPos, snitch.pos).normalize();
+        if (distPlayerToSnitch < 30) {
+            const awayFromPlayer = new THREE.Vector3().subVectors(snitch.pos, player.pos).normalize();
+            awayFromPlayer.y += 0.15;
+            desiredSnitchDir.lerp(awayFromPlayer.normalize(), 0.42).normalize();
+
+            if (elapsedTime - state.lastShimmerTime > 0.35) {
+                sound.playSnitchShimmer();
+                state.lastShimmerTime = elapsedTime;
+            }
+        }
+
+        const currentSnitchSpeed = distPlayerToSnitch < 25 ? diff.snitchSpeed * 0.82 : diff.snitchSpeed;
+        snitch.vel.lerp(desiredSnitchDir.multiplyScalar(currentSnitchSpeed), 2.8 * dt);
+        snitch.pos.addScaledVector(snitch.vel, dt);
+
+        // Keep Snitch inside stadium bounds
+        snitch.pos.x = THREE.MathUtils.clamp(snitch.pos.x, -PITCH_HALF_W + 8, PITCH_HALF_W - 8);
+        snitch.pos.z = THREE.MathUtils.clamp(snitch.pos.z, -PITCH_HALF_L + 8, PITCH_HALF_L - 8);
+        snitch.pos.y = THREE.MathUtils.clamp(snitch.pos.y, 10, MAX_ALTITUDE - 8);
+
+        snitchGroup.position.copy(snitch.pos);
+        snitchGroup.lookAt(snitch.pos.clone().add(snitch.vel));
+        // Rapid wing flutter
+        const flap = Math.sin(elapsedTime * 48) * 0.65;
+        wingLeft.rotation.z = flap;
+        wingRight.rotation.z = -flap;
+
+        // Golden sparkle trail
+        if (Math.random() < 0.55) {
+            spawnParticles(snitch.pos, 0xfef08a, 1, 4, 0.5);
+        }
+
+        // Generous 9.2m Catch Radius for Player! (+150 points & Wins Match)
+        if (distPlayerToSnitch < 9.2 && state.stunTimer <= 0) {
+            state.playerScore += 150;
+            state.snitchCaught = true;
+            updateScoreHUD();
+            sound.playCrowdCheer();
+            spawnParticles(snitch.pos, 0xfbbf24, 50, 34, 1.3);
+            endMatch("You caught the Golden Snitch for +150 points!");
+            return;
+        }
+
+        // 5. Forgiving Bludgers AI & Collision
+        bludgers.forEach((b, idx) => {
+            const targetPos = idx === 0 ? player.pos : (quaffle.holder && typeof quaffle.holder === 'object' ? quaffle.holder.pos : player.pos);
+            const toTarget = new THREE.Vector3().subVectors(targetPos, b.pos).normalize();
+            toTarget.x += Math.sin(elapsedTime * 2.2 + idx * 3) * 0.45;
+            toTarget.y += Math.cos(elapsedTime * 1.9 + idx * 2) * 0.35;
+            toTarget.normalize();
+
+            b.vel.lerp(toTarget.multiplyScalar(diff.bludgerSpeed), 1.4 * dt);
+            b.pos.addScaledVector(b.vel, dt);
+            b.mesh.position.copy(b.pos);
+            b.mesh.rotation.x += dt * 5;
+            b.mesh.rotation.z += dt * 4;
+
+            // Tighter 3.4m hitbox & forgiving recovery (player keeps Quaffle unless on Expert!)
+            if (b.pos.distanceTo(player.pos) < 3.4 && state.stunTimer <= 0) {
+                state.stunTimer = 0.65;
+                state.bludgerHits += 1;
+                state.cameraShake = 0.4;
+                sound.playBludgerHit();
+                spawnParticles(player.pos, 0xef4444, 16, 18, 0.55);
+                showNotification('BLUDGER GRAZE! KEEP FLYING!', 'text-amber-300 border-amber-400');
+
+                b.vel.negate().multiplyScalar(1.4);
+                b.pos.addScaledVector(b.vel, 0.4);
+
+                if (state.difficulty === 'hard' && player.hasQuaffle) {
+                    player.hasQuaffle = false;
+                    quaffle.holder = null;
+                    quaffle.pickupCooldown = 1.0;
+                    quaffle.vel.set((Math.random() - 0.5) * 18, 10, (Math.random() - 0.5) * 18);
+                }
+            }
+        });
+
+        // 6. Tame AI Chasers, Keeper & Rival Seeker Logic
+        aiAgents.forEach(agent => {
+            let goalPos = new THREE.Vector3();
+            let moveSpeed = diff.aiSpeed;
+
+            if (agent.role === 'rival_keeper') {
+                // Slow keeper patrolling mostly center hoop so side hoops are wide open
+                moveSpeed = diff.keeperSpeed;
+                const trackX = THREE.MathUtils.clamp(quaffle.pos.x * 0.55, -22, 22);
+                const trackY = THREE.MathUtils.clamp(quaffle.pos.y, 26, 40);
+                goalPos.set(trackX, trackY, -142);
+
+                // Keeper only saves occasionally on Casual/Standard
+                const saveRadius = state.difficulty === 'hard' ? 5.2 : 3.2;
+                if (quaffle.holder === null && quaffle.pos.distanceTo(agent.pos) < saveRadius) {
+                    quaffle.vel.z = Math.abs(quaffle.vel.z) * 0.7 + 20;
+                    quaffle.vel.x += (Math.random() - 0.5) * 24;
+                    spawnParticles(quaffle.pos, 0x38bdf8, 10, 14, 0.45);
+                    showNotification('DEFLECTED BY KEEPER!', 'text-sky-300 border-sky-400');
+                }
+            } else if (agent.role === 'rival_seeker') {
+                // Rival Seeker flies leisurely and only wins if player completely ignores the Snitch for a long time
+                moveSpeed = diff.snitchSpeed * diff.rivalSeekerFactor;
+                goalPos.copy(snitch.pos);
+
+                if (agent.pos.distanceTo(snitch.pos) < 3.0) {
+                    const rName = HOUSES[HOUSES[state.selectedHouse].rival].name;
+                    state.aiScore += 150;
+                    updateScoreHUD();
+                    endMatch(`${rName}'s Seeker caught the Golden Snitch (+150 pts)!`);
+                    return;
+                }
+            } else if (agent.role === 'rival_chaser') {
+                if (quaffle.holder === agent) {
+                    const targetHoop = homeHoops[1];
+                    goalPos.copy(targetHoop.position);
+                    if (agent.pos.distanceTo(targetHoop.position) < 40) {
+                        quaffle.holder = null;
+                        agent.hasQuaffle = false;
+                        quaffle.pickupCooldown = 0.9;
+                        const shotDir = new THREE.Vector3().subVectors(targetHoop.position, agent.pos).normalize();
+                        // Frequent wide shots on Casual/Standard
+                        const missSpread = Math.random() < diff.aiMissChance ? 0.65 : 0.12;
+                        shotDir.x += (Math.random() - 0.5) * missSpread;
+                        shotDir.y += (Math.random() - 0.5) * missSpread * 0.6;
+                        quaffle.vel.copy(shotDir).multiplyScalar(58);
+                        sound.playThrow();
+                    }
+                } else if (quaffle.holder === null) {
+                    goalPos.copy(quaffle.pos);
+                    if (quaffle.pickupCooldown <= 0 && agent.pos.distanceTo(quaffle.pos) < 4.2) {
+                        quaffle.holder = agent;
+                        agent.hasQuaffle = true;
+                    }
+                } else {
+                    // Stay respectfully behind player instead of aggressively stealing
+                    goalPos.copy(player.pos).add(new THREE.Vector3(18, 6, 22));
+                }
+            } else if (agent.role === 'ally_chaser') {
+                // Helpful teammate who grabs loose Quaffles and passes/scores!
+                moveSpeed = diff.aiSpeed * 1.18;
+                if (quaffle.holder === agent) {
+                    const targetHoop = targetHoops[1];
+                    goalPos.copy(targetHoop.position);
+                    if (agent.pos.distanceTo(targetHoop.position) < 42) {
+                        quaffle.holder = null;
+                        agent.hasQuaffle = false;
+                        quaffle.pickupCooldown = 0.8;
+                        const shotDir = new THREE.Vector3().subVectors(targetHoop.position, agent.pos).normalize();
+                        quaffle.vel.copy(shotDir).multiplyScalar(76);
+                        sound.playThrow();
+                    }
+                } else if (quaffle.holder === null) {
+                    goalPos.copy(quaffle.pos);
+                    if (quaffle.pickupCooldown <= 0 && agent.pos.distanceTo(quaffle.pos) < 5.8) {
+                        quaffle.holder = agent;
+                        agent.hasQuaffle = true;
+                    }
+                } else {
+                    goalPos.copy(player.pos).add(new THREE.Vector3(-16, 3, -18));
+                }
+            }
+
+            const dir = new THREE.Vector3().subVectors(goalPos, agent.pos);
+            if (dir.lengthSq() > 0.5) {
+                dir.normalize();
+                agent.vel.lerp(dir.multiplyScalar(moveSpeed), 3.0 * dt);
+                agent.pos.addScaledVector(agent.vel, dt);
+                agent.yaw = Math.atan2(-agent.vel.x, -agent.vel.z);
+            }
+
+            agent.model.root.position.copy(agent.pos);
+            agent.model.root.rotation.set(0, agent.yaw, 0);
+            agent.model.capePivot.rotation.x = 0.35 + Math.sin(elapsedTime * 12) * 0.1;
+        });
+
+        // 7. Smooth Chase Camera Follow with Dynamic FOV & Shake
+        const camOffset = new THREE.Vector3(0, 3.2, 10.5);
+        camOffset.applyEuler(new THREE.Euler(player.pitch * 0.65, player.yaw, 0, 'YXZ'));
+        const desiredCamPos = player.pos.clone().add(camOffset);
+        desiredCamPos.y = Math.max(2.5, desiredCamPos.y);
+
+        camera.position.lerp(desiredCamPos, Math.min(1, 11 * dt));
+
+        if (state.cameraShake > 0) {
+            state.cameraShake -= dt * 1.8;
+            camera.position.x += (Math.random() - 0.5) * state.cameraShake * 2.2;
+            camera.position.y += (Math.random() - 0.5) * state.cameraShake * 2.2;
+        }
+
+        const lookTarget = player.pos.clone().addScaledVector(forward, 22);
+        lookTarget.y += 1.2;
+        camera.lookAt(lookTarget);
+
+        const targetFov = state.isBoosting ? 76 : 65;
+        if (Math.abs(camera.fov - targetFov) > 0.1) {
+            camera.fov = THREE.MathUtils.lerp(camera.fov, targetFov, 6 * dt);
+            camera.updateProjectionMatrix();
+        }
+    }
+
+    // --- 14. 3D OFF-SCREEN / ON-SCREEN WAYPOINT MARKERS & MINI-RADAR ---
+    const markerSnitch = document.getElementById('marker-snitch');
+    const markerQuaffle = document.getElementById('marker-quaffle');
+    const markerHoop = document.getElementById('marker-hoop');
+    const radarCanvas = document.getElementById('radar-canvas');
+    const radarCtx = radarCanvas.getContext('2d');
+
+    function updateWaypointMarker(worldPos, markerEl, distEl) {
+        const dist = Math.round(player.pos.distanceTo(worldPos));
+        distEl.textContent = `${dist}m`;
+
+        const projected = worldPos.clone().project(camera);
+        const isBehind = projected.z > 1;
+
+        let x = (projected.x * 0.5 + 0.5) * window.innerWidth;
+        let y = (-(projected.y * 0.5) + 0.5) * window.innerHeight;
+
+        if (isBehind) {
+            x = window.innerWidth - x;
+            y = window.innerHeight - 60;
+        }
+
+        const pad = 42;
+        x = THREE.MathUtils.clamp(x, pad, window.innerWidth - pad);
+        y = THREE.MathUtils.clamp(y, 85, window.innerHeight - 95);
+
+        markerEl.style.left = `${x}px`;
+        markerEl.style.top = `${y}px`;
+    }
+
+    function updateHUDVisuals() {
+        if (state.mode !== 'playing') return;
+
+        // 3D Waypoints
+        updateWaypointMarker(snitch.pos, markerSnitch, document.getElementById('dist-snitch'));
+        updateWaypointMarker(quaffle.pos, markerQuaffle, document.getElementById('dist-quaffle'));
+        updateWaypointMarker(targetHoops[1].position, markerHoop, document.getElementById('dist-hoop'));
+
+        // Top-Down Pitch Radar
+        const w = radarCanvas.width;
+        const h = radarCanvas.height;
+        radarCtx.clearRect(0, 0, w, h);
+
+        // Pitch center line
+        radarCtx.strokeStyle = 'rgba(255,255,255,0.25)';
+        radarCtx.lineWidth = 1;
+        radarCtx.beginPath();
+        radarCtx.moveTo(w / 2, 0);
+        radarCtx.lineTo(w / 2, h);
+        radarCtx.stroke();
+
+        // Map world (Z: -175..175 -> X: 0..w, X: -95..95 -> Y: 0..h)
+        const mapX = (wz) => ((wz + PITCH_HALF_L) / (PITCH_HALF_L * 2)) * w;
+        const mapY = (wx) => ((wx + PITCH_HALF_W) / (PITCH_HALF_W * 2)) * h;
+
+        const drawDot = (wx, wz, color, r = 3) => {
+            radarCtx.fillStyle = color;
+            radarCtx.beginPath();
+            radarCtx.arc(mapX(wz), mapY(wx), r, 0, Math.PI * 2);
+            radarCtx.fill();
+        };
+
+        // Target hoops (left side of radar) & Home hoops (right side)
+        drawDot(0, -148, '#10b981', 3.5);
+        drawDot(0, 148, '#ef4444', 3.5);
+
+        // Bludgers
+        bludgers.forEach(b => drawDot(b.pos.x, b.pos.z, '#94a3b8', 2.5));
+
+        // Quaffle & Snitch
+        drawDot(quaffle.pos.x, quaffle.pos.z, '#ef4444', 3.5);
+        drawDot(snitch.pos.x, snitch.pos.z, '#fbbf24', 3.5);
+
+        // Player
+        drawDot(player.pos.x, player.pos.z, '#ffffff', 4);
+    }
+
+    // --- 15. MAIN ANIMATION LOOP ---
+    let lastTime = performance.now();
+    let elapsedTotal = 0;
+
+    function animateCrowdAndMotes(elapsed) {
+        for (let i = 0; i < crowdVoxels.length; i++) {
+            const c = crowdVoxels[i];
+            c.mesh.position.y = c.baseY + Math.abs(Math.sin(elapsed * 5.2 + c.phase)) * 1.15;
+        }
+        for (let i = 0; i < ambientMotes.length; i++) {
+            const m = ambientMotes[i];
+            m.mesh.position.y = m.baseY + Math.sin(elapsed * m.speed + m.phase) * 2.5;
+        }
+    }
+
+    function animate(now) {
+        requestAnimationFrame(animate);
+
+        const dt = Math.min(0.05, (now - lastTime) / 1000);
+        lastTime = now;
+        elapsedTotal += dt;
+
+        animateCrowdAndMotes(elapsedTotal);
+
+        if (state.mode === 'menu') {
+            // Scenic Orbit Camera around the Voxel Quidditch Stadium on Title Screen
+            const orbitAngle = elapsedTotal * 0.18;
+            camera.position.set(
+                Math.cos(orbitAngle) * 135,
+                58 + Math.sin(elapsedTotal * 0.4) * 10,
+                Math.sin(orbitAngle) * 165
+            );
+            camera.lookAt(0, 28, -20);
+
+            // Animate Golden Snitch on title screen
+            snitchGroup.position.set(Math.sin(elapsedTotal * 1.5) * 28, 38 + Math.cos(elapsedTotal * 2) * 6, -20);
+            const flap = Math.sin(elapsedTotal * 45) * 0.65;
+            wingLeft.rotation.z = flap;
+            wingRight.rotation.z = -flap;
+        } else if (state.mode === 'intro') {
+            updateIntroCeremony(dt, elapsedTotal);
+            updateParticles(dt);
+        } else if (state.mode === 'playing') {
+            updateGame(dt, elapsedTotal);
+            updateParticles(dt);
+            updateHUDVisuals();
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    // --- 16. EVENT LISTENERS (KEYBOARD, MOUSE, TOUCH, UI BUTTONS) ---
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    window.addEventListener('keydown', (e) => {
+        keys[e.code] = true;
+
+        if (e.code === 'Space') {
+            if (state.mode === 'intro') {
+                e.preventDefault();
+                beginActiveMatch();
+                return;
+            }
+            if (state.mode === 'playing') {
+                e.preventDefault();
+            }
+        }
+        if ((e.code === 'KeyE') && state.mode === 'playing') {
+            throwQuaffle();
+        }
+        if (e.code === 'KeyP' || e.code === 'Escape') {
+            if (state.mode === 'playing') {
+                state.mode = 'paused';
+                sound.updateWind(0, false);
+                document.getElementById('menu-pause').classList.remove('hidden');
+            } else if (state.mode === 'paused') {
+                state.mode = 'playing';
+                document.getElementById('menu-pause').classList.add('hidden');
+            }
+        }
+    });
+
+    window.addEventListener('keyup', (e) => {
+        keys[e.code] = false;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (state.mode !== 'playing') return;
+        mouse.active = true;
+        mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = (e.clientY / window.innerHeight) * 2 - 1;
+    });
+
+    canvas.addEventListener('mousedown', (e) => {
+        if (e.button === 0 && state.mode === 'playing') {
+            throwQuaffle();
+        }
+    });
+
+    // House Selection Cards
+    document.querySelectorAll('.house-card').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.house-card').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            state.selectedHouse = btn.dataset.house;
+            updateStadiumColors(state.selectedHouse);
+        });
+    });
+
+    // Difficulty Selection Buttons
+    document.querySelectorAll('.diff-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.diff-btn').forEach(b => {
+                b.classList.remove('bg-amber-500', 'text-slate-950');
+                b.classList.add('text-slate-300');
+            });
+            btn.classList.add('bg-amber-500', 'text-slate-950');
+            btn.classList.remove('text-slate-300');
+            state.difficulty = btn.dataset.diff;
+        });
+    });
+
+    // Menu & HUD Button Bindings
+    document.getElementById('btn-start-match').addEventListener('click', () => {
+        sound.init();
+        sound.resume();
+        startIntroCeremony();
+    });
+
+    document.getElementById('btn-skip-intro').addEventListener('click', () => {
+        if (state.mode === 'intro') {
+            beginActiveMatch();
+        }
+    });
+
+    document.getElementById('btn-music').addEventListener('click', () => {
+        sound.init();
+        const enabled = sound.toggleMusic();
+        document.getElementById('btn-music').classList.toggle('opacity-50', !enabled);
+    });
+
+    document.getElementById('btn-pause').addEventListener('click', () => {
+        if (state.mode === 'playing') {
+            state.mode = 'paused';
+            sound.updateWind(0, false);
+            document.getElementById('menu-pause').classList.remove('hidden');
+        }
+    });
+
+    document.getElementById('btn-resume').addEventListener('click', () => {
+        if (state.mode === 'paused') {
+            state.mode = 'playing';
+            document.getElementById('menu-pause').classList.add('hidden');
+        }
+    });
+
+    document.getElementById('btn-restart-pause').addEventListener('click', () => {
+        resetMatch();
+    });
+
+    document.getElementById('btn-quit').addEventListener('click', () => {
+        state.mode = 'menu';
+        sound.updateWind(0, false);
+        document.getElementById('menu-pause').classList.add('hidden');
+        document.getElementById('hud').classList.add('hidden');
+        document.getElementById('markers-layer').classList.add('hidden');
+        document.getElementById('crosshair').classList.add('hidden');
+        document.getElementById('touch-controls').classList.add('hidden');
+        document.getElementById('menu-start').classList.remove('hidden');
+    });
+
+    document.getElementById('btn-play-again').addEventListener('click', () => {
+        resetMatch();
+    });
+
+    document.getElementById('btn-end-menu').addEventListener('click', () => {
+        state.mode = 'menu';
+        document.getElementById('menu-gameover').classList.add('hidden');
+        document.getElementById('menu-start').classList.remove('hidden');
+    });
+
+    document.getElementById('btn-mute').addEventListener('click', () => {
+        sound.init();
+        const isMuted = sound.toggleMute();
+        document.getElementById('icon-sound-on').classList.toggle('hidden', isMuted);
+        document.getElementById('icon-sound-off').classList.toggle('hidden', !isMuted);
+    });
+
+    // Touch Controls Bindings
+    function bindTouchHold(id, onDown, onUp) {
+        const el = document.getElementById(id);
+        el.addEventListener('touchstart', (e) => { e.preventDefault(); onDown(); });
+        el.addEventListener('touchend', (e) => { e.preventDefault(); onUp(); });
+    }
+    bindTouchHold('tc-up', () => touchInput.pitch = 1, () => touchInput.pitch = 0);
+    bindTouchHold('tc-down', () => touchInput.pitch = -1, () => touchInput.pitch = 0);
+    bindTouchHold('tc-left', () => touchInput.yaw = 1, () => touchInput.yaw = 0);
+    bindTouchHold('tc-right', () => touchInput.yaw = -1, () => touchInput.yaw = 0);
+    bindTouchHold('tc-brake', () => touchInput.brake = true, () => touchInput.brake = false);
+    bindTouchHold('tc-boost', () => touchInput.boost = true, () => touchInput.boost = false);
+    document.getElementById('tc-throw').addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        throwQuaffle();
+    });
+
+    // Start Animation Loop on Load
+    window.onload = function () {
+        requestAnimationFrame(animate);
+    };
+    </script>
+</body>
+</html>
